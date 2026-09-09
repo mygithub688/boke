@@ -67,8 +67,20 @@ function renderHot(container) {
     <div class="page">
       <div class="hot-header">
         <h1 class="hot-title-big">热搜<span class="hot-fire">🔥</span></h1>
-        <p class="hot-sub">聚合各平台实时热点 · 每 5 分钟自动刷新</p>
+        <p class="hot-sub">聚合各平台实时热点</p>
         <div class="hot-actions">
+          <label class="hot-autorefresh">
+            <span class="hot-autorefresh-label">自动刷新</span>
+            <select id="hotAutoRefresh" class="hot-autorefresh-select">
+              <option value="0">关闭</option>
+              <option value="30">30 秒</option>
+              <option value="60">1 分钟</option>
+              <option value="120">2 分钟</option>
+              <option value="180">3 分钟</option>
+              <option value="300" selected>5 分钟</option>
+              <option value="600">10 分钟</option>
+            </select>
+          </label>
           <button class="btn btn-ghost" id="hotRefresh" style="font-size:13px;padding:6px 16px">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             刷新
@@ -152,14 +164,41 @@ async function loadHot() {
   }
 }
 
+function setupAutoRefresh() {
+  const select = document.getElementById('hotAutoRefresh')
+  if (!select) return null
+
+  // 恢复上次选择
+  const saved = localStorage.getItem('hot-autorefresh')
+  if (saved !== null) select.value = saved
+
+  let timer = null
+
+  function startTimer(seconds) {
+    if (timer) { clearInterval(timer); timer = null }
+    if (seconds > 0) {
+      timer = setInterval(() => loadHot(), seconds * 1000)
+    }
+  }
+
+  // 初始启动
+  startTimer(parseInt(select.value, 10))
+
+  select.addEventListener('change', () => {
+    localStorage.setItem('hot-autorefresh', select.value)
+    startTimer(parseInt(select.value, 10))
+  })
+
+  return () => { if (timer) clearInterval(timer) }
+}
+
 export default {
   render(container) {
     renderHot(container)
-    // 5 分钟自动刷新
-    const timer = setInterval(() => loadHot(), 5 * 60 * 1000)
+    const cleanupRefresh = setupAutoRefresh()
     const btn = document.getElementById('hotRefresh')
     if (btn) btn.addEventListener('click', loadHot)
-    return () => clearInterval(timer)
+    return () => { if (cleanupRefresh) cleanupRefresh() }
   },
   cleanup() {}
 }
