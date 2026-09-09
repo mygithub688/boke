@@ -4,6 +4,7 @@ const routes = {
   '/': () => import('./pages/home.js'),
   '/post/:id': () => import('./pages/article.js'),
   '/about': () => import('./pages/about.js'),
+  '/hot': () => import('./pages/hot.js'),
   '/search': () => import('./pages/search.js'),
   '/login': () => import('./pages/auth.js'),
   '/register': () => import('./pages/auth.js'),
