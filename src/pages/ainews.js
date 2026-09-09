@@ -117,7 +117,7 @@ async function loadAINews() {
     <div class="ai-section">
       ${sectionHeader({ name: '国内中文', color: '#e74c3c' })}
       <div class="ai-grid">
-        ${['量子位', '机器之心', '新智元'].map(name => `
+        ${['量子位', '爱范儿 AI', '新智元'].map(name => `
           <div class="ai-source-card">
             <div class="ai-source-title"><span class="dot"></span>${name}</div>
             ${skeletonItems()}
