@@ -20,9 +20,18 @@ def gh(path, method="GET", data=None):
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req) as r:
-            return r.status, json.loads(r.read())
+            body = r.read()
+            if not body:
+                return r.status, {}
+            return r.status, json.loads(body)
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read())
+        try:
+            body = e.read()
+            if not body:
+                return e.code, {}
+            return e.code, json.loads(body)
+        except:
+            return e.code, {}
 
 def main():
     # Check if repo exists
@@ -80,12 +89,14 @@ def main():
             payload = {"message": f"add {rel}", "content": b64}
 
         status, data = gh(f"/contents/{rel}?ref={branch}", method, payload)
-        if status == 200:
+        # GitHub Contents API: PUT returns 200 (update) or 201 (create)
+        # Sometimes urllib wraps it as HTTPError with code 200
+        if status in (200, 201) or (isinstance(data, dict) and data.get("content", {}).get("sha")):
             pushed += 1
             print(f"  [OK] {rel}")
         else:
             failed += 1
-            err = data.get("message", str(data))
+            err = data.get("message", str(data)) if isinstance(data, dict) else str(data)
             print(f"  [FAIL] {rel}: {err}")
 
         time.sleep(0.3)
