@@ -1,4 +1,6 @@
-// 文章 + 标签 CRUD API（需 JWT 认证）+ 搜索 + 草稿 + 浏览量 + 点赞收藏
+// 文章 + 标签 CRUD API（需 JWT 认证）+ 搜索 + 草稿 + 浏览量 + 点赞收藏 + 热搜
+import { getHotTopics, flattenTopics } from './hot.js'
+
 export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
   const url = new URL(req.url, 'http://localhost')
   const pathname = url.pathname
@@ -9,6 +11,7 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
     (pathname === '/api/posts' && req.method === 'GET') ||
     (pathname === '/api/tags' && req.method === 'GET') ||
     (pathname === '/api/search' && req.method === 'GET') ||
+    (pathname === '/api/hot' && req.method === 'GET') ||
     (pathname.startsWith('/api/posts/') && req.method === 'GET') ||
     (pathname === '/api/posts' && req.method === 'GET' && searchParams.has('tag')) ||
     // 点赞/收藏公开（用 user_key）
@@ -223,6 +226,20 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
     }
 
     return json(res, 404, { error: 'Not found' })
+  }
+
+  // ===== 热搜 =====
+
+  // GET /api/hot  公开（支持 ?source=baidu&toutiao）
+  if (pathname === '/api/hot' && req.method === 'GET') {
+    const source = searchParams.get('source')
+    const agg = await getHotTopics(source)
+    const keys = Object.keys(agg)
+    if (keys.length === 0) {
+      return json(res, 200, { sources: {}, flat: [] })
+    }
+    const flat = flattenTopics(agg).slice(0, 50)
+    return json(res, 200, { sources: agg, flat })
   }
 
   // ===== 标签 =====
