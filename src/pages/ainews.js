@@ -36,8 +36,8 @@ function aiBadge(rank) {
   return `<span class="ai-rank">${rank}</span>`
 }
 
-function aiItemHTML(item, source) {
-  const hotLabel = source === 'hn' ? 'pts' : source === 'hf' ? 'up' : 'stars'
+function aiItemHTML(item, sourceKey) {
+  const hotLabel = sourceKey === 'hn' ? 'pts' : sourceKey === 'gh' ? 'stars' : ''
   return `
     <a class="ai-item" href="${esc(item.url)}" target="_blank" rel="noopener">
       ${aiBadge(item.rank)}
@@ -51,15 +51,23 @@ function aiItemHTML(item, source) {
 }
 
 function skeletonItems() {
-  return Array.from({ length: 6 }, (_, i) => `
+  return Array.from({ length: 5 }, (_, i) => `
     <div class="ai-item skeleton">
       <div class="skeleton-line" style="width:24px;height:24px;border-radius:50%"></div>
       <div style="flex:1">
         <div class="skeleton-line" style="width:80%;height:14px;margin-bottom:6px"></div>
-        <div class="skeleton-line" style="width:50%;height:11px"></div>
       </div>
     </div>
   `).join('')
+}
+
+function sectionHeader(section) {
+  return `
+    <div class="ai-section-header">
+      <span class="ai-section-dot" style="background:${section.color}"></span>
+      <h2 class="ai-section-title">${esc(section.name)}</h2>
+    </div>
+  `
 }
 
 function renderAINews(container) {
@@ -67,7 +75,7 @@ function renderAINews(container) {
     <div class="page">
       <div class="ai-header">
         <h1 class="ai-title-big">AI 前沿<span class="ai-spark">⚡</span></h1>
-        <p class="ai-sub">Hacker News · TechCrunch AI · GitHub 新星</p>
+        <p class="ai-sub">国内中文 · 国际前沿 · 开源新星</p>
         <div class="ai-actions">
           <label class="ai-autorefresh">
             <span class="ai-autorefresh-label">自动刷新</span>
@@ -87,7 +95,7 @@ function renderAINews(container) {
         </div>
       </div>
 
-      <div class="ai-grid" id="aiGrid">
+      <div id="aiContent">
         <div class="ai-source-card" style="grid-column:1/-1;padding:40px;text-align:center">
           <p style="color:var(--text-muted)">正在抓取 AI 前沿动态…</p>
         </div>
@@ -100,45 +108,71 @@ function renderAINews(container) {
 }
 
 async function loadAINews() {
-  const grid = document.querySelector('#aiGrid')
+  const content = document.querySelector('#aiContent')
   const timeEl = document.querySelector('#aiTime')
-  if (!grid) return
+  if (!content) return
 
   // 骨架
-  const sourceNames = ['Hacker News', 'TechCrunch AI', 'GitHub AI 新星']
-  grid.innerHTML = sourceNames.map(name => `
-    <div class="ai-source-card">
-      <div class="ai-source-title"><span class="dot"></span>${name}</div>
-      ${skeletonItems()}
+  content.innerHTML = `
+    <div class="ai-section">
+      ${sectionHeader({ name: '国内中文', color: '#e74c3c' })}
+      <div class="ai-grid">
+        ${['量子位', '机器之心', '新智元'].map(name => `
+          <div class="ai-source-card">
+            <div class="ai-source-title"><span class="dot"></span>${name}</div>
+            ${skeletonItems()}
+          </div>
+        `).join('')}
+      </div>
     </div>
-  `).join('')
+    <div class="ai-section">
+      ${sectionHeader({ name: '国际前沿', color: '#2980b9' })}
+      <div class="ai-grid">
+        ${['Hacker News', 'TechCrunch AI', 'GitHub AI 新星'].map(name => `
+          <div class="ai-source-card">
+            <div class="ai-source-title"><span class="dot"></span>${name}</div>
+            ${skeletonItems()}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `
 
   try {
     const res = await fetch(API_BASE + '/api/ainews')
     const d = await res.json()
-    const sources = d.sources || {}
+    const sections = d.sections || {}
 
-    if (Object.keys(sources).length === 0) {
-      grid.innerHTML = '<div class="ai-source-card" style="grid-column:1/-1;padding:40px;text-align:center"><p style="color:var(--text-muted)">所有源均不可用，请稍后重试</p></div>'
+    if (Object.keys(sections).length === 0) {
+      content.innerHTML = '<div class="ai-source-card" style="padding:40px;text-align:center"><p style="color:var(--text-muted)">所有源均不可用，请稍后重试</p></div>'
       return
     }
 
-    grid.innerHTML = Object.entries(sources).map(([key, s]) => `
-      <div class="ai-source-card">
-        <div class="ai-source-title">
-          <span class="dot" style="background:${s.color}"></span>
-          ${esc(s.name)}
-          ${s.stale ? '<span class="stale-badge">缓存</span>' : ''}
+    content.innerHTML = Object.entries(sections).map(([key, section]) => {
+      const sourceCards = Object.entries(section.sources || {}).map(([sKey, s]) => `
+        <div class="ai-source-card">
+          <div class="ai-source-title">
+            <span class="dot" style="background:${s.color}"></span>
+            ${esc(s.name)}
+            ${s.stale ? '<span class="stale-badge">缓存</span>' : ''}
+          </div>
+          ${s.items.length > 0 ? s.items.map(it => aiItemHTML(it, sKey)).join('') : '<p style="color:var(--text-muted);font-size:13px;padding:8px 0">暂无数据</p>'}
         </div>
-        ${s.items.length > 0 ? s.items.map(it => aiItemHTML(it, key)).join('') : '<p style="color:var(--text-muted);font-size:13px;padding:8px 0">暂无数据</p>'}
-      </div>
-    `).join('')
+      `).join('')
+
+      return `
+        <div class="ai-section">
+          ${sectionHeader(section)}
+          <div class="ai-grid">${sourceCards}</div>
+        </div>
+      `
+    }).join('')
 
     if (timeEl) {
       timeEl.textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
     }
   } catch (e) {
-    grid.innerHTML = '<div class="ai-source-card" style="grid-column:1/-1;padding:40px;text-align:center"><p style="color:#e07070">加载失败：' + esc(e.message) + '</p></div>'
+    content.innerHTML = '<div class="ai-source-card" style="padding:40px;text-align:center"><p style="color:#e07070">加载失败：' + esc(e.message) + '</p></div>'
   }
 }
 
@@ -147,7 +181,6 @@ function setupAutoRefresh() {
   if (!select) return null
   const saved = localStorage.getItem('ai-autorefresh')
   if (saved !== null) select.value = saved
-
   let timer = null
   function startTimer(seconds) {
     if (timer) { clearInterval(timer); timer = null }
