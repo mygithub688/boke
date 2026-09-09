@@ -248,9 +248,8 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
 
   // GET /api/ainews  公开（支持 ?source=hn&hf&gh）
   if (pathname === '/api/ainews' && req.method === 'GET') {
-    const source = searchParams.get('source')
-    const agg = await getAINews(source)
-    return json(res, 200, { sources: agg })
+    const agg = await getAINews()
+    return json(res, 200, { sections: agg })
   }
 
   // ===== 标签 =====
