@@ -12,6 +12,7 @@ const routes = {
   '/admin/posts/new': () => import('./pages/admin.js'),
   '/admin/posts/:id': () => import('./pages/admin.js'),
   '/admin/tags': () => import('./pages/admin.js'),
+  '/admin/settings': () => import('./pages/admin.js'),
 }
 
 const app = document.getElementById('app')
@@ -72,6 +73,7 @@ export async function render() {
   else if (key === '/admin/posts') params.sub = 'posts'
   else if (key === '/admin/posts/:id') { params.sub = 'posts'; params.id = params.id }
   else if (key === '/admin/tags') params.sub = 'tags'
+  else if (key === '/admin/settings') params.sub = 'settings'
 
   const cleanup = C.render(app, params)
   if (typeof cleanup === 'function') currentComponent.cleanup = cleanup
