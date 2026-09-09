@@ -1814,3 +1814,204 @@ img { display: block; max-width: 100%; }
   .tag-filter { gap: 6px; }
   .tag-filter-item { padding: 4px 10px; font-size: 12px; }
 }
+
+/* ============================================================
+   热搜页
+   ============================================================ */
+.hot-header {
+  text-align: center;
+  margin-bottom: 36px;
+  padding-top: 20px;
+}
+.hot-title-big {
+  font-family: var(--font-serif);
+  font-size: 40px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.hot-fire {
+  display: inline-block;
+  animation: hotPulse 2s ease infinite;
+}
+@keyframes hotPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+.hot-sub {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+.hot-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.hot-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 源卡片网格 */
+.hot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  margin-bottom: 48px;
+}
+.hot-source-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: border-color 0.2s;
+}
+.hot-source-card:hover {
+  border-color: var(--border-strong);
+}
+.hot-source-title {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hot-source-title .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.stale-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+/* 单条热搜 */
+.hot-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  text-decoration: none;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.hot-item:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.hot-item.skeleton {
+  pointer-events: none;
+  gap: 12px;
+}
+.hot-rank {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.hot-rank.r1 { background: rgba(255, 80, 80, 0.15); color: #ff5050; }
+.hot-rank.r2 { background: rgba(255, 160, 60, 0.15); color: #ffa03c; }
+.hot-rank.r3 { background: rgba(255, 200, 60, 0.15); color: #ffc83c; }
+.hot-title {
+  flex: 1;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hot-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* 跨平台热榜 */
+.hot-flat-section {
+  margin-top: 8px;
+}
+.hot-flat-title {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.hot-flat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hot-flat-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+.hot-flat-item:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.hot-flat-rank {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.hot-flat-rank.top {
+  background: rgba(212, 169, 98, 0.15);
+  color: var(--accent);
+}
+.hot-flat-title {
+  flex: 1;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hot-flat-src {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* 热搜响应式 */
+@media (max-width: 768px) {
+  .hot-grid {
+    grid-template-columns: 1fr;
+  }
+  .hot-title-big { font-size: 32px; }
+}
