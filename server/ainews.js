@@ -39,27 +39,41 @@ function parseRSS(xml) {
 // ===== 国内中文源 =====
 
 async function fetchQbitai() {
-  const xml = await fetchText('https://www.qbitai.com/feed')
-  const items = parseRSS(xml)
-  return items.slice(0, 10).map((item, i) => ({
+  // 爬首页 HTML 拿 20 条（RSS 只有 10 条）
+  const html = await fetchText('https://www.qbitai.com/')
+  const matches = [...html.matchAll(/href="(https:\/\/www\.qbitai\.com\/\d{4}\/\d{2}\/\d+\.html)"[^>]*>([^<]{5,})</g)]
+  const seen = new Set()
+  const items = []
+  for (const m of matches) {
+    const url = m[1]
+    const title = m[2].trim()
+    if (url && title && !seen.has(url)) {
+      seen.add(url)
+      items.push({ title, url })
+    }
+  }
+  return items.slice(0, 15).map((item, i) => ({
     rank: i + 1,
     title: item.title,
-    url: item.link,
+    url: item.url,
     hot: '',
-    source: 'qbitai',
-    date: item.date
+    source: 'qbitai'
   }))
 }
 
-async function fetchJiqizhixin() {
-  const xml = await fetchText('https://decemberpei.cyou/rssbox/wechat-jiqizhixin.xml')
+async function fetchIfanr() {
+  const xml = await fetchText('https://www.ifanr.com/feed')
   const items = parseRSS(xml)
-  return items.slice(0, 10).map((item, i) => ({
+  // 只保留含 AI 相关关键词的
+  const aiKeywords = /\b(ai|llm|gpt|claude|模型|人工智能|大模型|机器人|智能|机器学习|深度学习|agent|transformer)\b/i
+  const filtered = items.filter(it => aiKeywords.test(it.title))
+  const final = filtered.length >= 8 ? filtered : items
+  return final.slice(0, 10).map((item, i) => ({
     rank: i + 1,
     title: item.title,
     url: item.link,
     hot: '',
-    source: 'jiqizhixin',
+    source: 'ifanr',
     date: item.date
   }))
 }
@@ -145,7 +159,7 @@ const SECTIONS = [
     color: '#e74c3c',
     sources: [
       { key: 'qbitai', name: '量子位', fetch: fetchQbitai, color: '#1a73e8' },
-      { key: 'jiqizhixin', name: '机器之心', fetch: fetchJiqizhixin, color: '#34a853' },
+      { key: 'ifanr', name: '爱范儿 AI', fetch: fetchIfanr, color: '#34a853' },
       { key: 'xinzhiyuan', name: '新智元', fetch: fetchXinzhiyuan, color: '#9c27b0' },
     ]
   },
