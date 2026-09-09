@@ -6,3 +6,4 @@ server/blog.db-wal
 .DS_Store
 Thumbs.db
 *.log
+push_to_github.py
