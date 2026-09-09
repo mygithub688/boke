@@ -1846,7 +1846,39 @@ img { display: block; max-width: 100%; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 14px;
+}
+.hot-autorefresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hot-autorefresh-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.hot-autorefresh-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 24px 4px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23999' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.hot-autorefresh-select:hover {
+  border-color: var(--border-strong);
+}
+.hot-autorefresh-select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 .hot-time {
   font-family: var(--font-mono);
