@@ -71,7 +71,10 @@ async function fetchToutiao() {
 }
 
 async function fetchDouyin() {
-  const text = await fetchUrl('https://www.douyin.com/aweme/v1/web/hot/search/list/?device_platform=webapp&aid=6383')
+  const text = await fetchUrl('https://www.douyin.com/aweme/v1/web/hot/search/list/?device_platform=webapp&aid=6383', {
+    'Referer': 'https://www.douyin.com/',
+    'Accept': 'application/json'
+  })
   const d = JSON.parse(text)
   const items = d.data?.word_list || []
   return items.map((it, i) => ({
