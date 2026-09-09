@@ -129,9 +129,9 @@ async function fetchWeibo() {
 const SOURCES = [
   { key: 'baidu', name: '百度热搜', fetch: fetchBaidu, color: '#2938c8' },
   { key: 'toutiao', name: '今日头条', fetch: fetchToutiao, color: '#f5222d' },
-  { key: 'douyin', name: '抖音热榜', fetch: fetchDouyin, color: '#fe2c55' },
   { key: 'zhihu', name: '知乎热榜', fetch: fetchZhihu, color: '#0066ff' },
   { key: 'weibo', name: '微博热搜', fetch: fetchWeibo, color: '#ff8200' },
+  { key: 'douyin', name: '抖音热榜', fetch: fetchDouyin, color: '#fe2c55' },
 ]
 
 export async function getHotTopics(sourceKey = null) {
