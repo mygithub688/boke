@@ -1,5 +1,5 @@
 // 前端 API 客户端 + 认证状态
-export const API_BASE = 'http://localhost:3004'
+export const API_BASE = 'http://localhost:3006'
 
 let token = localStorage.getItem('blog-token')
 
