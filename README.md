@@ -53,13 +53,15 @@ node server/index.js
 │       ├── search.js      # 搜索
 │       ├── auth.js        # 登录/注册
 │       ├── hot.js         # 热搜聚合页
+│       ├── ainews.js      # AI 前沿页
 │       └── admin.js       # 管理面板（仪表盘/文章管理/标签管理/账户设置）
 └── server/
     ├── index.js           # HTTP 服务器 + 路由分发
     ├── db.js              # SQLite 初始化 + 种子数据
     ├── auth.js            # 注册/登录/me/改密码
     ├── api.js             # 文章 CRUD + 标签管理 + 统计
-    └── hot.js             # 热搜聚合（多源抓取 + 内存缓存）
+    ├── hot.js             # 热搜聚合（多源抓取 + 内存缓存）
+    └── ainews.js          # AI 新闻聚合（HN/TC/GitHub）
 ```
 
 ## API 端点
@@ -75,6 +77,7 @@ node server/index.js
 | POST | `/api/tags` | JWT | 新建标签 |
 | DELETE | `/api/tags/:id` | JWT | 删除标签（无文章引用时） |
 | GET | `/api/hot` | 公开 | 热搜聚合（百度/头条/抖音/知乎/微博，5 分钟缓存） |
+| GET | `/api/ainews` | 公开 | AI 前沿（HN/TechCrunch AI/GitHub，10 分钟缓存） |
 | GET | `/api/stats` | JWT | 统计数据 |
 | POST | `/api/auth/register` | 公开 | 注册 |
 | POST | `/api/auth/login` | 公开 | 登录 |
@@ -162,7 +165,8 @@ bash deploy.sh
 | `#/admin/posts` | 文章管理 |
 | `#/admin/posts/new` | 新建文章 |
 | `#/admin/posts/:id` | 编辑文章 |
-| `#/hot` | 热搜聚合（百度/头条/抖音/知乎/微博） |
+| `#/hot` | 热搜聚合（百度/头条/知乎/抖音/微博） |
+| `#/ainews` | AI 前沿（Hacker News/TechCrunch AI/GitHub 新星） |
 | `#/admin/tags` | 标签管理 |
 | `#/admin/settings` | 账户设置（修改密码/账户信息） |
 
