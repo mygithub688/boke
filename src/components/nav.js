@@ -2,6 +2,7 @@ import { navigate } from '../router.js'
 
 const NAV_ITEMS = [
   { label: '文章', route: '/', path: '/' },
+  { label: '热搜', route: '/hot', path: '/hot' },
   { label: '关于', route: '/about', path: '/about' },
   { label: '标签', route: '/tags', path: '/#tags' },
 ]
