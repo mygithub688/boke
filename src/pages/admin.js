@@ -38,6 +38,10 @@ function sidebarHTML(user, active) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
         标签管理
       </a>
+      <a href="#/admin/settings" class="${active === 'settings' ? 'active' : ''}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1.08z"/></svg>
+        账户设置
+      </a>
       <div class="sidebar-footer">
         <div class="user-name">${esc(user?.displayName || user?.username || '')}</div>
         <span class="logout-btn" id="logoutBtn">退出登录</span>
@@ -110,43 +114,7 @@ async function renderDashboard(container, user) {
       </table>`
     }
 
-    // 修改密码
-    html += `
-      <h2 style="font-family:var(--font-serif);font-size:18px;margin:28px 0 16px">修改密码</h2>
-      <div class="editor-panel" style="max-width:400px">
-        <form id="pwdForm">
-          <div class="form-group">
-            <label>旧密码</label>
-            <input type="password" name="old" required />
-          </div>
-          <div class="form-group">
-            <label>新密码</label>
-            <input type="password" name="new" required minlength="6" />
-          </div>
-          <div class="form-group">
-            <label>确认新密码</label>
-            <input type="password" name="confirm" required minlength="6" />
-          </div>
-          <button type="submit" class="btn btn-primary">更新密码</button>
-        </form>
-      </div>`
-
     container.querySelector('#dashContent').innerHTML = html
-
-    // 修改密码
-    container.querySelector('#pwdForm')?.addEventListener('submit', async e => {
-      e.preventDefault()
-      const fd = new FormData(e.target)
-      const oldP = fd.get('old'), newP = fd.get('new'), confirmP = fd.get('confirm')
-      if (newP !== confirmP) { toast('两次新密码不一致', true); return }
-      try {
-        await changePassword(oldP, newP)
-        toast('密码已更新')
-        e.target.reset()
-      } catch (err) {
-        toast(err.message, true)
-      }
-    })
   } catch (err) {
     container.querySelector('#statsRow').innerHTML = `<div class="stat-card"><div class="stat-value" style="font-size:16px">加载失败</div><div class="stat-label">${esc(err.message)}</div></div>`
   }
@@ -360,6 +328,63 @@ async function renderTags(container, user) {
   })
 }
 
+// ===== 账户设置 =====
+async function renderSettings(container, user) {
+  container.innerHTML = `
+    <div class="admin-layout">
+      ${sidebarHTML(user, 'settings')}
+      <div class="admin-main">
+        <h1>账户设置</h1>
+
+        <div class="editor-panel" style="max-width:420px">
+          <h2 style="font-family:var(--font-serif);font-size:18px;margin-bottom:20px">修改密码</h2>
+          <form id="pwdForm">
+            <div class="form-group">
+              <label>旧密码</label>
+              <input type="password" name="old" required />
+            </div>
+            <div class="form-group">
+              <label>新密码</label>
+              <input type="password" name="new" required minlength="6" />
+            </div>
+            <div class="form-group">
+              <label>确认新密码</label>
+              <input type="password" name="confirm" required minlength="6" />
+            </div>
+            <button type="submit" class="btn btn-primary">更新密码</button>
+          </form>
+        </div>
+
+        <div class="editor-panel" style="max-width:420px;margin-top:24px">
+          <h2 style="font-family:var(--font-serif);font-size:18px;margin-bottom:16px">账户信息</h2>
+          <table class="admin-table">
+            <tbody>
+              <tr><td>用户名</td><td style="font-family:var(--font-mono)">${esc(user?.username || '')}</td></tr>
+              <tr><td>显示名</td><td>${esc(user?.displayName || '')}</td></tr>
+              <tr><td>角色</td><td>${esc(user?.role || '')}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `
+  document.querySelector('#logoutBtn').addEventListener('click', () => { logout(); window.location.hash = '/' })
+
+  container.querySelector('#pwdForm')?.addEventListener('submit', async e => {
+    e.preventDefault()
+    const fd = new FormData(e.target)
+    const oldP = fd.get('old'), newP = fd.get('new'), confirmP = fd.get('confirm')
+    if (newP !== confirmP) { toast('两次新密码不一致', true); return }
+    try {
+      await changePassword(oldP, newP)
+      toast('密码已更新')
+      e.target.reset()
+    } catch (err) {
+      toast(err.message, true)
+    }
+  })
+}
+
 // ===== 路由分发 =====
 export default {
   render(container, params) {
@@ -376,6 +401,8 @@ export default {
         else renderPosts(container, user)
       } else if (sub === 'tags') {
         renderTags(container, user)
+      } else if (sub === 'settings') {
+        renderSettings(container, user)
       } else {
         renderDashboard(container, user)
       }
