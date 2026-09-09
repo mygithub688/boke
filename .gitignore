@@ -1,0 +1,8 @@
+node_modules/
+dist/
+server/blog.db
+server/blog.db-shm
+server/blog.db-wal
+.DS_Store
+Thumbs.db
+*.log
