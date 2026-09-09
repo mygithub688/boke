@@ -115,7 +115,7 @@ async function loadHot() {
   if (!grid) return
 
   // 显示骨架
-  const sourceNames = ['百度热搜', '今日头条', '抖音热榜', '知乎热榜', '微博热搜']
+  const sourceNames = ['百度热搜', '今日头条', '知乎热榜', '微博热搜', '抖音热榜']
   grid.innerHTML = sourceNames.map(name => `
     <div class="hot-source-card">
       <div class="hot-source-title"><span class="dot"></span>${name}</div>
