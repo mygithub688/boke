@@ -33,18 +33,23 @@ node server/index.js   # 终端 2：后端 API
 
 ## 功能一览
 
-- 文章：发布 / 编辑 / 草稿 / 精选 / 标签 / 搜索 / 归档 / 浏览量 / 点赞收藏
-- 评论区：访客免注册评论（昵称 + 内容），管理面板删除
+- 文章：发布 / 编辑 / 草稿 / 精选 / 标签 / 搜索 / 归档 / 浏览量（同访客同篇每日去重）/ 点赞收藏
+- **Markdown 编辑器**：MD/HTML 双模式实时预览，本地草稿自动保存（误关浏览器可恢复），定时发布（到点自动转正式）
+- 评论区：访客免注册评论，**本地 AI 自动审核**（垃圾评论进待审箱，AI 不可用时自动放行），管理面板筛选/放行/删除
 - 本地 AI（需启动 LocalAI Studio，默认 `127.0.0.1:8787`，环境变量 `AI_BASE` / `AI_MODEL` 可改）：
   - 文章页 AI 摘要（懒生成，结果缓存在文章表）
+  - 站内 AI 问答悬浮窗（关键词检索文章 + 模型作答，每 IP 限流）
   - 编辑器 AI 助手：润色 / 续写 / 起标题 / 推荐标签 / 写摘要
   - AI 日报：每天 9 点后自动把聚合的 AI 资讯写成文章发布，也可在仪表盘手动生成
 - 聚合页：热搜（百度/头条/知乎/微博/抖音）+ AI 前沿（量子位/爱范儿/新智元/HN/TechCrunch/GitHub）
-- RSS 订阅：`/feed.xml`
+- **热搜历史快照**：每天自动存档，前台可回看任意一天的热榜
+- **关键词盯梢**：配置关键词，在 AI 前沿聚合内容里扫描命中，仪表盘展示
+- RSS 订阅：`/feed.xml`；SEO：`/sitemap.xml` + `/robots.txt`
 - 访问统计：PV/UV 按天记录，管理仪表盘 30 天趋势图（纯 canvas）
 - 友链：前台展示页 + 管理面板增删
 - 图片上传：编辑器插图按钮，base64 上传到 `uploads/`，单张限 8MB
-- 安全：scrypt 密码哈希、手写 JWT、登录限流（每 IP 15 分钟 10 次）、评论限流、静态文件白名单、上传格式白名单
+- 阅读体验：代码块高亮 + 一键复制、图片点击灯箱、AI 朗读（浏览器语音合成）、目录 TOC
+- 数据安全：一键导出全站 JSON 备份 / 导入恢复（合并或替换模式），登录限流（每 IP 15 分钟 10 次），评论限流，静态文件白名单，上传格式白名单
 
 ## 项目结构
 
@@ -64,11 +69,13 @@ node server/index.js   # 终端 2：后端 API
 │   ├── router.js          # 轻量 hash router
 │   ├── effects.js         # 动态特效（打字机/星尘/3D tilt/视差等）
 │   ├── utils/
-│   │   └── highlight.js   # 零依赖代码高亮（js/py/rust/bash/css + 嗅探）
+│   │   ├── highlight.js   # 零依赖代码高亮（js/py/rust/bash/css + 嗅探）
+│   │   └── markdown.js    # 零依赖 Markdown → HTML 转换（编辑器用）
 │   ├── components/
 │   │   ├── nav.js         # 导航栏
 │   │   ├── footer.js      # 页脚
-│   │   └── postCard.js    # 文章卡片
+│   │   ├── postCard.js    # 文章卡片
+│   │   └── askAi.js       # 站内 AI 问答悬浮窗
 │   └── pages/
 │       ├── home.js        # 首页
 │       ├── article.js     # 文章详情（AI 摘要/TOC/代码高亮/评论区）
@@ -85,9 +92,10 @@ node server/index.js   # 终端 2：后端 API
     ├── index.js           # HTTP 服务器 + 路由分发 + 静态伺服 + RSS
     ├── db.js              # SQLite 初始化 + 种子数据
     ├── auth.js            # 注册/登录/me/改密码（登录限流）
-    ├── api.js             # 文章/标签/评论/归档/友链/统计/上传/AI 接口
-    ├── ai.js              # 本地大模型客户端（摘要/写作助手）
+    ├── api.js             # 文章/标签/评论/归档/友链/统计/上传/AI/盯梢/备份 接口
+    ├── ai.js              # 本地大模型客户端（摘要/写作助手/评论审核/问答）
     ├── aidigest.js        # AI 日报生成 + 定时调度
+    ├── scheduler.js       # 站点调度器（定时发布 + 热搜每日快照）
     ├── ratelimit.js       # 内存限流器
     ├── hot.js             # 热搜聚合（多源抓取 + 内存缓存）
     └── ainews.js          # AI 新闻聚合
@@ -106,13 +114,21 @@ node server/index.js   # 终端 2：后端 API
 | GET | `/api/tags` | 公开 | 获取标签 + 文章计数 |
 | POST | `/api/tags` | JWT | 新建标签 |
 | DELETE | `/api/tags/:id` | JWT | 删除标签（无文章引用时） |
-| GET/POST | `/api/posts/:id/comments` | 公开 | 评论列表 / 发表评论（限流） |
-| GET | `/api/admin/comments` | JWT | 全部评论（含文章标题） |
+| GET/POST | `/api/posts/:id/comments` | 公开 | 评论列表 / 发表评论（限流 + AI 审核） |
+| GET | `/api/admin/comments` | JWT | 全部评论（含状态：正常/待审/垃圾） |
 | DELETE | `/api/comments/:id` | JWT | 删除评论 |
+| PUT | `/api/comments/:id/approve` | JWT | 人工放行评论 |
 | GET | `/api/links` | 公开 | 友链列表 |
 | POST | `/api/links` | JWT | 新增友链 |
 | DELETE | `/api/links/:id` | JWT | 删除友链 |
 | POST | `/api/track` | 公开 | PV/UV 埋点（user_key） |
+| POST | `/api/posts/:id/view` | 公开 | 浏览计数（同访客同篇每日去重） |
+| GET | `/api/watch` / POST / DELETE `/api/watch/:id` | JWT | 关键词盯梢管理 |
+| GET | `/api/watch/matches` | JWT | 扫描 AI 新闻中的关键词命中 |
+| GET | `/api/hot/history/days` / `?day=` | 公开 | 热搜历史快照 |
+| GET | `/api/admin/export` | JWT | 导出全站 JSON 备份 |
+| POST | `/api/admin/import` | JWT | 导入备份（merge/replace） |
+| POST | `/api/ask` | 公开 | 站内 AI 问答（检索 + 模型作答） |
 | GET | `/api/stats` | JWT | 统计数据 |
 | GET | `/api/stats/chart` | JWT | 近 30 天 PV/UV 图表数据 |
 | POST | `/api/upload` | JWT | 图片上传（base64，≤8MB） |

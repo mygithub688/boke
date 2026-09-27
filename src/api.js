@@ -108,4 +108,25 @@ export function aiDigest() { return api('/api/ai/digest', 'POST') }
 // ===== 图片上传 =====
 export function uploadImage(name, dataUrl) { return api('/api/upload', 'POST', { name, data: dataUrl }) }
 
+// ===== 评论审核 / 定时发布 / 去重浏览 =====
+export function approveComment(id) { return api(`/api/comments/${id}/approve`, 'PUT') }
+export function incrementView(postId) { return api(`/api/posts/${postId}/view`, 'POST', { user_key: getUserKey() }) }
+
+// ===== 关键词盯梢 =====
+export function fetchWatch() { return api('/api/watch') }
+export function addWatch(keyword) { return api('/api/watch', 'POST', { keyword }) }
+export function deleteWatch(id) { return api(`/api/watch/${id}`, 'DELETE') }
+export function fetchWatchMatches() { return api('/api/watch/matches') }
+
+// ===== 热搜历史 =====
+export function fetchHotDays() { return api('/api/hot/history/days') }
+export function fetchHotHistory(day) { return api(`/api/hot/history?day=${encodeURIComponent(day)}`) }
+
+// ===== 数据导出/导入 =====
+export function exportData() { return api('/api/admin/export') }
+export function importData(payload, mode = 'merge') { return api('/api/admin/import', 'POST', { ...payload, mode }) }
+
+// ===== 站内 AI 问答 =====
+export function askAi(question) { return api('/api/ask', 'POST', { question }) }
+
 export { getToken, setToken, clearToken, getUserKey }

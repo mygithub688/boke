@@ -104,6 +104,26 @@ export async function writeAssist(action, content) {
   )
 }
 
+// 评论审核：返回 'ok'（正常）或 'spam'（垃圾/广告）
+export async function moderateComment(nickname, content) {
+  const verdict = await chat([
+    { role: 'system', content: '你是博客评论审核器。判断评论是否为垃圾内容（广告、引流、灌水、辱骂、无关推广）。只输出一个词：OK 或 SPAM。' },
+    { role: 'user', content: `昵称：${nickname}\n评论：${content}` }
+  ], { maxTokens: 5, temperature: 0 })
+  return /spam/i.test(verdict) ? 'spam' : 'ok'
+}
+
+// 站内问答：基于检索到的文章片段回答
+export async function answerQuestion(question, articles) {
+  const context = articles
+    .map((a, i) => `【文章${i + 1}】《${a.title}》\n${a.text.slice(0, 1500)}`)
+    .join('\n\n')
+  return await chat([
+    { role: 'system', content: '你是这个博客的 AI 问答助手。根据给出的博客文章片段回答访客问题；如果片段不足以回答，就诚实说博客里没有相关内容。回答末尾用一行"参考：《文章标题》"列出用到的文章。用中文，简洁。' },
+    { role: 'user', content: `博客文章片段：\n${context}\n\n访客问题：${question}` }
+  ], { maxTokens: 800, temperature: 0.5 })
+}
+
 // AI 日报正文：把聚合到的新闻标题写成一篇可发布的 HTML 文章
 export async function generateDigestHtml(newsText, dateStr) {
   return await chat([

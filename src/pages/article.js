@@ -1,6 +1,6 @@
 import { postCard } from '../components/postCard.js'
 import { site } from '../data.js'
-import { fetchPost, likePost, unlikePost, bookmarkPost, unbookmarkPost, fetchPostStats, getUserKey, aiSummary, fetchComments, addComment, deleteComment } from '../api.js'
+import { fetchPost, likePost, unlikePost, bookmarkPost, unbookmarkPost, fetchPostStats, getUserKey, aiSummary, fetchComments, addComment, deleteComment, incrementView } from '../api.js'
 import { highlightArticleCode } from '../utils/highlight.js'
 
 function footerHTML() {
@@ -215,6 +215,10 @@ function renderArticle(container, { id }) {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
               <span id="bmCount">0</span>
             </button>
+            <button class="action-btn" id="btnTts" title="AI 朗读（浏览器语音合成）">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              <span id="ttsLabel">朗读</span>
+            </button>
           </div>
 
           <div class="article-end">
@@ -249,6 +253,40 @@ function renderArticle(container, { id }) {
     if (body) {
       // 代码高亮
       highlightArticleCode(body)
+
+      // 代码块一键复制
+      body.querySelectorAll('pre').forEach(pre => {
+        if (pre.querySelector('.copy-btn')) return
+        pre.style.position = 'relative'
+        const btn = document.createElement('button')
+        btn.className = 'copy-btn'
+        btn.type = 'button'
+        btn.textContent = '复制'
+        btn.addEventListener('click', async () => {
+          const code = pre.querySelector('code') || pre
+          try {
+            await navigator.clipboard.writeText(code.innerText)
+            btn.textContent = '已复制 ✓'
+          } catch {
+            btn.textContent = '复制失败'
+          }
+          setTimeout(() => { btn.textContent = '复制' }, 1600)
+        })
+        pre.appendChild(btn)
+      })
+
+      // 图片灯箱
+      body.addEventListener('click', e => {
+        const img = e.target.closest('img')
+        if (!img) return
+        const overlay = document.createElement('div')
+        overlay.className = 'lightbox'
+        overlay.innerHTML = `<img src="${img.src}" alt="${img.alt || ''}" />`
+        document.body.appendChild(overlay)
+        overlay.addEventListener('click', () => overlay.remove())
+        const onEsc = ev => { if (ev.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onEsc) } }
+        document.addEventListener('keydown', onEsc)
+      })
 
       const headings = body.querySelectorAll('h2, h3')
       headings.forEach((h, i) => { h.id = `toc-${i}` })
@@ -346,6 +384,37 @@ function renderArticle(container, { id }) {
     // AI 摘要 + 评论区
     bindAiSummary(container, post)
     bindComments(container, post.id)
+
+    // 浏览量去重上报（同一访客每篇每天只计一次）
+    incrementView(post.id).then(({ view_count }) => {
+      const vc = container.querySelector('#viewCount')
+      if (vc) vc.textContent = `${view_count} 次浏览`
+    }).catch(() => {})
+
+    // AI 朗读（浏览器 speechSynthesis）
+    const btnTts = container.querySelector('#btnTts')
+    const ttsLabel = container.querySelector('#ttsLabel')
+    btnTts.addEventListener('click', () => {
+      const synth = window.speechSynthesis
+      if (!synth) { ttsLabel.textContent = '不支持' ; return }
+      if (synth.speaking) {
+        synth.cancel()
+        ttsLabel.textContent = '朗读'
+        return
+      }
+      const plain = (post.title + '。' + post.excerpt + '。' + post.body_html)
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .slice(0, 5000)
+      const utter = new SpeechSynthesisUtterance(plain)
+      utter.lang = 'zh-CN'
+      utter.rate = 1.05
+      const voice = synth.getVoices().find(v => v.lang.startsWith('zh')) 
+      if (voice) utter.voice = voice
+      utter.onend = () => { ttsLabel.textContent = '朗读' }
+      ttsLabel.textContent = '停止'
+      synth.speak(utter)
+    })
 
     return function cleanup() {
       window.removeEventListener('scroll', onScroll)

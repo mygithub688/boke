@@ -3,6 +3,7 @@ import { createDb } from './db.js'
 import { handleAuth } from './auth.js'
 import { handleApi } from './api.js'
 import { scheduleDailyDigest } from './aidigest.js'
+import { startScheduler } from './scheduler.js'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -116,6 +117,24 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  // robots.txt / sitemap.xml
+  if (pathname === '/robots.txt' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+    const host = req.headers.host || `localhost:${PORT}`
+    return res.end(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin\n\nSitemap: ${process.env.SITE_URL || `http://${host}`}/sitemap.xml\n`)
+  }
+  if (pathname === '/sitemap.xml' && req.method === 'GET') {
+    const siteUrl = process.env.SITE_URL || `http://${req.headers.host || `localhost:${PORT}`}`
+    const posts = db.prepare('SELECT slug, updated_at FROM posts WHERE is_draft = 0 ORDER BY created_at DESC').all()
+    const urls = [
+      `${siteUrl}/`,
+      ...posts.map(p => `${siteUrl}/#/post/${p.slug}`)
+    ]
+    const lastmod = posts[0] ? (posts[0].updated_at || '').slice(0, 10) : new Date().toISOString().slice(0, 10)
+    res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' })
+    return res.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `  <url><loc>${xmlEsc(u)}</loc><lastmod>${lastmod}</lastmod></url>`).join('\n')}\n</urlset>`)
+  }
+
   // RSS 订阅
   if (pathname === '/feed.xml' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' })
@@ -183,15 +202,17 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`[server] Blog running at http://localhost:${PORT} (前端 + API 单进程)`)
   scheduleDailyDigest(db)
+  startScheduler(db)
 })
 
-// RSS 2.0 订阅源
+// robots.txt / sitemap.xml
 function xmlEsc(s) {
   return String(s || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }
 
+// RSS 2.0 订阅源
 function buildFeed(db, host) {
   const siteUrl = process.env.SITE_URL || `http://${host}`
   const posts = db.prepare(

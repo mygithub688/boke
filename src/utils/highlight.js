@@ -1,8 +1,12 @@
 // 零依赖代码高亮：支持 js/ts/py/rust/bash/json/css/c 系常见语法
-// 用法：highlightElement(el, lang) —— 传入 pre>code 元素，就地替换 innerHTML
+// 单遍扫描：注释/字符串/数字/关键词/内置名 一次 matchAll 完成，避免二次替换破坏标签
+// 用法：highlightElement(el) —— 传入文章容器，就地高亮其中 pre>code
 
 function esc(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+function span(cls, text) {
+  return `<span class="${cls}">${esc(text)}</span>`
 }
 
 const LANGS = {
@@ -23,45 +27,49 @@ const LANGS = {
     builtins: /\b(git|npm|node|python|pip|curl|wget|docker|apt|apk|brew|ls|cp|mv|rm|mkdir|cat|grep|sed|awk|chmod|chown|tar|ssh|systemctl|pm2|wsl)\b/
   },
   css: {
-    keywords: /#[0-9a-fA-F]{3,8}\b|\.[a-zA-Z_][\w-]*|:[a-z-]+(?:\([^)]*\))?/,
+    hashComments: false,
+    keywords: /#[0-9a-fA-F]{3,8}\b|\.[a-zA-Z_][\w-]*|::?[a-z-]+(?:\([^)]*\))?/,
     builtins: /\b(display|position|flex|grid|color|background|margin|padding|border|width|height|font|top|right|bottom|left|opacity|transform|transition|animation|box-shadow|border-radius|align|justify)\b/
   },
-  json: { keywords: /\b(true|false|null)\b/, builtins: /()$/ }
+  json: {
+    hashComments: false,
+    keywords: /\b(true|false|null)\b/,
+    builtins: /__()__/
+  }
 }
-const ALIAS = { javascript: 'js', typescript: 'js', jsx: 'js', tsx: 'js', py: 'python', sh: 'bash', shell: 'bash', zsh: 'bash', html: 'css', xml: 'css', yml: 'bash', yaml: 'bash', c: 'js', cpp: 'js', java: 'js', go: 'js', ts: 'js' }
+const ALIAS = { javascript: 'js', typescript: 'js', jsx: 'js', tsx: 'js', ts: 'js', c: 'js', cpp: 'js', java: 'js', go: 'js', py: 'python', sh: 'bash', shell: 'bash', zsh: 'bash', html: 'css', xml: 'css', yml: 'bash', yaml: 'bash' }
 
 function highlight(code, lang) {
   const cfg = LANGS[lang]
   if (!cfg) return esc(code)
 
-  // 主扫描器：依次匹配 注释/字符串/数字/关键词/内置名，其余原样输出
-  const parts = [
-    /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)/,        // 1 注释（py/bash 用 #，c 系用 // /**/）
-    /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)/, // 2 字符串
-    /(\b\d+(?:\.\d+)?\b)/,                            // 3 数字
-  ]
-  const master = new RegExp(
-    parts.map(r => r.source).join('|'),
-    'g'
-  )
+  // 注释风格按语言区分：css/json 只有 /* */，其余支持 //、#、/* */
+  const commentSrc = cfg.hashComments === false
+    ? '(\\/\\*[\\s\\S]*?\\*\\/)'
+    : '(\\/\\/[^\\n]*|#[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)'
+  const stringSrc = '("(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)'
+
+  const master = new RegExp([
+    commentSrc,                               // 1 注释
+    stringSrc,                                // 2 字符串
+    '(\\b\\d+(?:\\.\\d+)?\\b)',               // 3 数字
+    `(?:${cfg.keywords.source})`,             // 关键词
+    `(?:${cfg.builtins.source})`              // 内置名
+  ].join('|'), 'g')
 
   let out = ''
   let last = 0
   for (const m of code.matchAll(master)) {
+    const full = m[0]
     out += esc(code.slice(last, m.index))
-    const [full] = m
-    if (m[1]) out += `<span class="tok-com">${esc(full)}</span>`
-    else if (m[2]) out += `<span class="tok-str">${esc(full)}</span>`
-    else out += `<span class="tok-num">${esc(full)}</span>`
+    if (m[1]) out += span('tok-com', full)
+    else if (m[2]) out += span('tok-str', full)
+    else if (m[3]) out += span('tok-num', full)
+    else if (cfg.keywords.test(full)) out += span('tok-kw', full)
+    else out += span('tok-bi', full)
     last = m.index + full.length
   }
   out += esc(code.slice(last))
-
-  // 关键词 / 内置名（对已转义的纯文本再走一遍，避免破坏 span 标签：只匹配词边界）
-  out = out.replace(new RegExp(`(^|[^\\w<])(${cfg.keywords.source}|${cfg.builtins.source})(?=[^\\w]|$)`, 'g'), (s, pre, word) => {
-    const cls = cfg.keywords.test(word) ? 'tok-kw' : 'tok-bi'
-    return `${pre}<span class="${cls}">${word}</span>`
-  })
   return out
 }
 

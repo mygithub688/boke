@@ -88,6 +88,28 @@ export async function createDb() {
       pv INTEGER DEFAULT 0
     );
 
+    -- 浏览量去重：同一访客每篇文章每天只计一次
+    CREATE TABLE IF NOT EXISTS post_views (
+      post_id INTEGER NOT NULL,
+      day TEXT NOT NULL,
+      user_key TEXT NOT NULL,
+      PRIMARY KEY (post_id, day, user_key)
+    );
+
+    -- 评论状态：ok 正常展示 / pending 待审 / spam 垃圾（AI 审核结果）
+    -- 热搜每日快照 / 关键词盯梢
+    CREATE TABLE IF NOT EXISTS hot_history (
+      day TEXT PRIMARY KEY,
+      snapshot TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS watch_keywords (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      keyword TEXT UNIQUE NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_tag ON posts(tag);
     CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_draft ON posts(is_draft);
@@ -101,6 +123,9 @@ export async function createDb() {
   try { db.prepare('ALTER TABLE posts ADD COLUMN view_count INTEGER DEFAULT 0').run() } catch {}
   try { db.prepare('ALTER TABLE posts ADD COLUMN ai_summary TEXT').run() } catch {}
   try { db.prepare('ALTER TABLE posts ADD COLUMN ai_summary_at TEXT').run() } catch {}
+  try { db.prepare('ALTER TABLE posts ADD COLUMN scheduled_at TEXT').run() } catch {}
+  try { db.prepare('ALTER TABLE comments ADD COLUMN status TEXT DEFAULT \'ok\'').run() } catch {}
+  try { db.prepare('ALTER TABLE comments ADD COLUMN ip TEXT DEFAULT \'\'').run() } catch {}
 
   // 种子数据（首次运行）
   const count = db.prepare('SELECT COUNT(*) as n FROM posts').get()

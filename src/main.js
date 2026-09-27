@@ -1,4 +1,5 @@
 import './components/nav.js'
+import './components/askAi.js'
 import { render } from './router.js'
 import { initEffects } from './effects.js'
 

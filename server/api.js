@@ -2,7 +2,7 @@
 // + 评论 + 归档 + 友链 + 访问统计 + 图片上传 + 本地 AI（摘要/写作助手/日报）
 import { getHotTopics, flattenTopics } from './hot.js'
 import { getAINews } from './ainews.js'
-import { generateSummary, writeAssist } from './ai.js'
+import { generateSummary, writeAssist, moderateComment, answerQuestion, stripHtml, aiAvailable } from './ai.js'
 import { generateDailyDigest } from './aidigest.js'
 import { createRateLimiter } from './ratelimit.js'
 import path from 'node:path'
@@ -15,7 +15,15 @@ const UPLOAD_DIR = path.join(__dirname, '..', 'uploads')
 
 const commentLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 5 })   // 每 key 10 分钟 5 条
 const aiLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 6 })             // AI 摘要 全局 6 次/分钟
+const askLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 5 })            // 站内问答 每 IP 5 次/分钟
 const pendingSummaries = new Map() // slug → Promise，防止并发重复生成
+
+// 带超时的评论审核：AI 不可用/超时/出错一律放行（fail-open）
+function moderateWithTimeout(nickname, content, ms = 10000) {
+  const timeout = new Promise(resolve => setTimeout(() => resolve('ok'), ms))
+  const work = moderateComment(nickname, content).catch(() => 'ok')
+  return Promise.race([work, timeout])
+}
 
 export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
   const url = new URL(req.url, 'http://localhost')
@@ -33,10 +41,13 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
     (pathname === '/api/links' && req.method === 'GET') ||
     (pathname === '/api/track' && req.method === 'POST') ||
     (pathname === '/api/ai/summary' && req.method === 'POST') ||
+    (pathname === '/api/ask' && req.method === 'POST') ||
+    (pathname === '/api/hot/history' && req.method === 'GET') ||
+    (pathname === '/api/hot/history/days' && req.method === 'GET') ||
     (pathname.startsWith('/api/posts/') && req.method === 'GET') ||
     (pathname === '/api/posts' && req.method === 'GET' && searchParams.has('tag')) ||
-    // 点赞/收藏公开（用 user_key）
-    (pathname.match(/^\/api\/posts\/\d+\/(like|bookmark|unlike|unbookmark|views)$/) && (req.method === 'POST' || req.method === 'GET')) ||
+    // 点赞/收藏/浏览公开（用 user_key）
+    (pathname.match(/^\/api\/posts\/\d+\/(like|bookmark|unlike|unbookmark|views|view)$/) && (req.method === 'POST' || req.method === 'GET')) ||
     // 评论：浏览公开，发表公开（限流）
     (pathname.match(/^\/api\/posts\/\d+\/comments$/) && (req.method === 'GET' || req.method === 'POST'))
   let user = null
@@ -111,10 +122,7 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
         const payload = verifyJwt(token)
         if (!payload) return json(res, 403, { error: '草稿文章，需要登录' })
       }
-      // 增加浏览量
-      db.prepare('UPDATE posts SET view_count = view_count + 1 WHERE id = ?').run(post.id)
-      post.view_count += 1
-
+      // 浏览量由前端 POST /view（带 user_key 去重）统计，这里不再自增
       const related = db.prepare(
         `SELECT id, title, slug, tag, excerpt, is_featured, view_count, created_at
          FROM posts WHERE id != ? AND is_draft = 0 ORDER BY created_at DESC LIMIT 3`
@@ -127,15 +135,15 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
   // POST /api/posts  需要认证
   if (pathname === '/api/posts' && req.method === 'POST') {
     const body = await readBody(req)
-    const { title, tag, excerpt, body: bodyHtml, isFeatured, isDraft } = body
+    const { title, tag, excerpt, body: bodyHtml, isFeatured, isDraft, scheduledAt } = body
     if (!title || !tag || !bodyHtml) return json(res, 400, { error: 'title, tag, body 必填' })
 
     const slug = generateSlug(title, db)
-    db.prepare('INSERT INTO posts (title, slug, tag, excerpt, body_html, is_featured, is_draft) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(title, slug, tag, excerpt || '', bodyHtml, isFeatured ? 1 : 0, isDraft ? 1 : 0)
+    db.prepare('INSERT INTO posts (title, slug, tag, excerpt, body_html, is_featured, is_draft, scheduled_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(title, slug, tag, excerpt || '', bodyHtml, isFeatured ? 1 : 0, isDraft ? 1 : 0, normalizeSchedule(scheduledAt))
     db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').run(tag)
 
-    const post = db.prepare('SELECT id, title, slug, tag, excerpt, is_featured, is_draft, created_at FROM posts WHERE slug = ?').get(slug)
+    const post = db.prepare('SELECT id, title, slug, tag, excerpt, is_featured, is_draft, scheduled_at, created_at FROM posts WHERE slug = ?').get(slug)
     return json(res, 201, { post })
   }
 
@@ -153,12 +161,13 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
     const bodyHtml = body.body || existing.body_html
     const isFeatured = body.isFeatured !== undefined ? (body.isFeatured ? 1 : 0) : existing.is_featured
     const isDraft = body.isDraft !== undefined ? (body.isDraft ? 1 : 0) : existing.is_draft
+    const scheduledAt = body.scheduledAt !== undefined ? normalizeSchedule(body.scheduledAt) : existing.scheduled_at
 
-    db.prepare(`UPDATE posts SET title=?, tag=?, excerpt=?, body_html=?, is_featured=?, is_draft=?, updated_at=datetime('now') WHERE id=?`)
-      .run(title, tag, excerpt, bodyHtml, isFeatured, isDraft, id)
+    db.prepare(`UPDATE posts SET title=?, tag=?, excerpt=?, body_html=?, is_featured=?, is_draft=?, scheduled_at=?, updated_at=datetime('now') WHERE id=?`)
+      .run(title, tag, excerpt, bodyHtml, isFeatured, isDraft, scheduledAt, id)
     db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').run(tag)
 
-    const post = db.prepare('SELECT id, title, slug, tag, excerpt, is_featured, is_draft, view_count, created_at, updated_at FROM posts WHERE id = ?').get(id)
+    const post = db.prepare('SELECT id, title, slug, tag, excerpt, is_featured, is_draft, scheduled_at, view_count, created_at, updated_at FROM posts WHERE id = ?').get(id)
     return json(res, 200, { post })
   }
 
@@ -197,11 +206,19 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
       return json(res, 200, { post: { ...post, is_draft: newDraft } })
     }
 
-    // POST /api/posts/:id/view  增加浏览量（公开）
+    // POST /api/posts/:id/view  增加浏览量（公开，同访客每篇每天只计一次）
     if (action === 'view' && req.method === 'POST') {
-      db.prepare('UPDATE posts SET view_count = view_count + 1 WHERE id = ?').run(id)
-      const vc = db.prepare('SELECT view_count FROM posts WHERE id = ?').get(id).view_count
-      return json(res, 200, { view_count: vc })
+      const body = await readBody(req)
+      const userKey = String(body.user_key || '').slice(0, 40)
+      if (!userKey) return json(res, 200, { view_count: post.view_count, counted: false })
+      const day = new Date().toISOString().slice(0, 10)
+      const r = db.prepare('INSERT OR IGNORE INTO post_views (post_id, day, user_key) VALUES (?, ?, ?)').run(id, day, userKey)
+      let vc = post.view_count
+      if (r.changes > 0) {
+        db.prepare('UPDATE posts SET view_count = view_count + 1 WHERE id = ?').run(id)
+        vc = db.prepare('SELECT view_count FROM posts WHERE id = ?').get(id).view_count
+      }
+      return json(res, 200, { view_count: vc, counted: r.changes > 0 })
     }
 
     // POST /api/posts/:id/like  点赞（公开，用 user_key）
@@ -249,15 +266,16 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
       return json(res, 200, { like_count: likeCount, bookmark_count: bookmarkCount })
     }
 
-    // GET /api/posts/:id/comments  评论列表（公开）
+    // GET /api/posts/:id/comments  评论列表（公开，只展示通过审核的）
     if (action === 'comments' && req.method === 'GET') {
       const comments = db.prepare(
-        'SELECT id, nickname, content, created_at FROM comments WHERE post_id = ? ORDER BY created_at DESC LIMIT 100'
+        `SELECT id, nickname, content, created_at FROM comments
+         WHERE post_id = ? AND status = 'ok' ORDER BY created_at DESC LIMIT 100`
       ).all(id)
       return json(res, 200, { comments, total: comments.length })
     }
 
-    // POST /api/posts/:id/comments  发表评论（公开，限流）
+    // POST /api/posts/:id/comments  发表评论（公开，限流 + AI 审核）
     if (action === 'comments' && req.method === 'POST') {
       const body = await readBody(req)
       const nickname = String(body.nickname || '').trim().slice(0, 30)
@@ -268,11 +286,13 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
       if (!commentLimiter(userKey + ip)) {
         return json(res, 429, { error: '评论太频繁了，休息一下再发' })
       }
-      const r = db.prepare('INSERT INTO comments (post_id, user_key, nickname, content, ip) VALUES (?, ?, ?, ?, ?)')
-        .run(id, userKey, nickname, content, ip)
-      const comment = db.prepare('SELECT id, nickname, content, created_at FROM comments WHERE id = ?').get(r.lastInsertRowid)
-      const total = db.prepare('SELECT COUNT(*) as n FROM comments WHERE post_id = ?').get(id).n
-      return json(res, 201, { comment, total })
+      // AI 审核：垃圾进待审区（管理员可见），正常/审核不可用直接展示
+      const status = await moderateWithTimeout(nickname, content)
+      const r = db.prepare('INSERT INTO comments (post_id, user_key, nickname, content, ip, status) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(id, userKey, nickname, content, ip, status)
+      const comment = db.prepare('SELECT id, nickname, content, status, created_at FROM comments WHERE id = ?').get(r.lastInsertRowid)
+      const total = db.prepare(`SELECT COUNT(*) as n FROM comments WHERE post_id = ? AND status = 'ok'`).get(id).n
+      return json(res, 201, { comment, total, moderated: status !== 'ok' })
     }
 
     return json(res, 404, { error: 'Not found' })
@@ -359,7 +379,7 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
   // ===== 管理面板专用：获取所有文章（含草稿） =====
   if (pathname === '/api/admin/posts' && req.method === 'GET') {
     const posts = db.prepare(
-      'SELECT id, title, slug, tag, excerpt, is_featured, is_draft, view_count, created_at, updated_at FROM posts ORDER BY created_at DESC'
+      'SELECT id, title, slug, tag, excerpt, is_featured, is_draft, scheduled_at, view_count, created_at, updated_at FROM posts ORDER BY created_at DESC'
     ).all()
     const tags = db.prepare('SELECT name FROM tags ORDER BY name').all().map(t => t.name)
     return json(res, 200, { posts, tags })
@@ -427,7 +447,7 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
   // ===== 评论管理（需认证） =====
   if (pathname === '/api/admin/comments' && req.method === 'GET') {
     const comments = db.prepare(`
-      SELECT c.id, c.post_id, c.nickname, c.content, c.created_at, p.title as post_title, p.slug as post_slug
+      SELECT c.id, c.post_id, c.nickname, c.content, c.status, c.created_at, p.title as post_title, p.slug as post_slug
       FROM comments c LEFT JOIN posts p ON p.id = c.post_id
       ORDER BY c.created_at DESC LIMIT 200
     `).all()
@@ -437,6 +457,145 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
   if (commentDel && req.method === 'DELETE') {
     db.prepare('DELETE FROM comments WHERE id = ?').run(parseInt(commentDel[1]))
     return json(res, 200, { ok: true })
+  }
+  // PUT /api/comments/:id/approve  人工放行待审/垃圾评论
+  const commentApprove = pathname.match(/^\/api\/comments\/(\d+)\/approve$/)
+  if (commentApprove && req.method === 'PUT') {
+    db.prepare(`UPDATE comments SET status = 'ok' WHERE id = ?`).run(parseInt(commentApprove[1]))
+    return json(res, 200, { ok: true })
+  }
+
+  // ===== 关键词盯梢（AI 前沿内容监控，需认证） =====
+  if (pathname === '/api/watch' && req.method === 'GET') {
+    const keywords = db.prepare('SELECT id, keyword, created_at FROM watch_keywords ORDER BY id DESC').all()
+    return json(res, 200, { keywords })
+  }
+  if (pathname === '/api/watch' && req.method === 'POST') {
+    const body = await readBody(req)
+    const keyword = String(body.keyword || '').trim().slice(0, 30)
+    if (!keyword) return json(res, 400, { error: 'keyword 必填' })
+    db.prepare('INSERT OR IGNORE INTO watch_keywords (keyword) VALUES (?)').run(keyword)
+    return json(res, 201, { ok: true })
+  }
+  const watchDel = pathname.match(/^\/api\/watch\/(\d+)$/)
+  if (watchDel && req.method === 'DELETE') {
+    db.prepare('DELETE FROM watch_keywords WHERE id = ?').run(parseInt(watchDel[1]))
+    return json(res, 200, { ok: true })
+  }
+  // GET /api/watch/matches  在当前 AI 新闻聚合里扫描关键词命中
+  if (pathname === '/api/watch/matches' && req.method === 'GET') {
+    const keywords = db.prepare('SELECT keyword FROM watch_keywords').all().map(r => r.keyword)
+    if (keywords.length === 0) return json(res, 200, { matches: [] })
+    const sections = await getAINews()
+    const matches = []
+    for (const sec of Object.values(sections)) {
+      for (const src of Object.values(sec.sources || {})) {
+        for (const it of (src.items || [])) {
+          const hitKeyword = keywords.find(k => (it.title || '').toLowerCase().includes(k.toLowerCase()))
+          if (hitKeyword) {
+            matches.push({ keyword: hitKeyword, source: src.name, title: it.title, url: it.url, hot: it.hot })
+          }
+        }
+      }
+    }
+    return json(res, 200, { matches, scanned: keywords.length })
+  }
+
+  // ===== 热搜历史快照（公开） =====
+  if (pathname === '/api/hot/history/days' && req.method === 'GET') {
+    const days = db.prepare('SELECT day FROM hot_history ORDER BY day DESC LIMIT 90').all().map(r => r.day)
+    return json(res, 200, { days })
+  }
+  if (pathname === '/api/hot/history' && req.method === 'GET') {
+    const day = searchParams.get('day') || new Date().toISOString().slice(0, 10)
+    const row = db.prepare('SELECT day, snapshot FROM hot_history WHERE day = ?').get(day)
+    if (!row) return json(res, 404, { error: '该日期没有快照' })
+    return json(res, 200, { day: row.day, sources: JSON.parse(row.snapshot) })
+  }
+
+  // ===== 数据导出/导入（需认证） =====
+  if (pathname === '/api/admin/export' && req.method === 'GET') {
+    const data = {
+      app: 'hana-blog', version: 2, exported_at: new Date().toISOString(),
+      posts: db.prepare('SELECT * FROM posts ORDER BY id').all(),
+      tags: db.prepare('SELECT * FROM tags').all(),
+      comments: db.prepare('SELECT * FROM comments').all(),
+      friend_links: db.prepare('SELECT * FROM friend_links').all(),
+      watch_keywords: db.prepare('SELECT * FROM watch_keywords').all()
+    }
+    return json(res, 200, data)
+  }
+  if (pathname === '/api/admin/import' && req.method === 'POST') {
+    const body = await readBody(req)
+    if (body.app !== 'hana-blog' || !Array.isArray(body.posts)) {
+      return json(res, 400, { error: '不是有效的博客备份文件' })
+    }
+    const replaceAll = body.mode === 'replace'
+    let counts = {}
+    const run = () => {
+      if (replaceAll) {
+        for (const t of ['posts', 'tags', 'comments', 'friend_links', 'watch_keywords']) {
+          db.prepare(`DELETE FROM ${t}`).run()
+        }
+      }
+      const insPost = db.prepare(`INSERT OR IGNORE INTO posts (id, title, slug, tag, excerpt, body_html, is_featured, is_draft, view_count, ai_summary, scheduled_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      for (const p of body.posts) {
+        insPost.run(p.id, p.title, p.slug, p.tag, p.excerpt, p.body_html, p.is_featured, p.is_draft, p.view_count || 0, p.ai_summary, p.scheduled_at, p.created_at, p.updated_at)
+      }
+      const insTag = db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)')
+      for (const t of (body.tags || [])) insTag.run(t.name)
+      const insCmt = db.prepare('INSERT OR IGNORE INTO comments (id, post_id, user_key, nickname, content, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      for (const c of (body.comments || [])) insCmt.run(c.id, c.post_id, c.user_key, c.nickname, c.content, c.status || 'ok', c.created_at)
+      const insLink = db.prepare('INSERT OR IGNORE INTO friend_links (id, name, url, description, created_at) VALUES (?, ?, ?, ?, ?)')
+      for (const l of (body.friend_links || [])) insLink.run(l.id, l.name, l.url, l.description, l.created_at)
+      const insWatch = db.prepare('INSERT OR IGNORE INTO watch_keywords (keyword) VALUES (?)')
+      for (const w of (body.watch_keywords || [])) insWatch.run(w.keyword)
+      counts = {
+        posts: body.posts.length, tags: (body.tags || []).length,
+        comments: (body.comments || []).length, links: (body.friend_links || []).length
+      }
+    }
+    db.exec('BEGIN')
+    try { run(); db.exec('COMMIT') }
+    catch (err) { db.exec('ROLLBACK'); return json(res, 500, { error: `导入失败：${err.message}` }) }
+    return json(res, 200, { ok: true, mode: replaceAll ? 'replace' : 'merge', ...counts })
+  }
+
+  // ===== 站内 AI 问答（公开，限流）：关键词检索 + 本地模型作答 =====
+  if (pathname === '/api/ask' && req.method === 'POST') {
+    const ip = req.socket?.remoteAddress || ''
+    if (!askLimiter(ip)) return json(res, 429, { error: '问得太快了，稍等一下' })
+    const body = await readBody(req)
+    const question = String(body.question || '').trim().slice(0, 300)
+    if (!question) return json(res, 400, { error: 'question 必填' })
+
+    // 检索：CJK 二元组 + 英文单词，按词频给文章打分
+    const posts = db.prepare('SELECT id, title, body_html FROM posts WHERE is_draft = 0').all()
+    const terms = extractTerms(question)
+    const scored = posts.map(p => {
+      const text = stripHtml(p.body_html)
+      let score = 0
+      for (const t of terms) {
+        if (p.title.includes(t)) score += 3
+        const occurrences = text.split(t).length - 1
+        if (occurrences > 0) score += Math.min(occurrences, 5)
+      }
+      return { title: p.title, text, score }
+    }).sort((a, b) => b.score - a.score).filter(p => p.score > 0).slice(0, 3)
+
+    if (!(await aiAvailable())) {
+      return json(res, 503, { error: '本地 AI 服务未启动，暂时无法问答' })
+    }
+    if (scored.length === 0) {
+      return json(res, 200, { answer: '博客里暂时没有和这个问题相关的内容。', sources: [] })
+    }
+    try {
+      const answer = await answerQuestion(question, scored)
+      return json(res, 200, { answer, sources: scored.map(s => s.title) })
+    } catch (err) {
+      return json(res, 502, { error: err.message })
+    }
   }
 
   // ===== 图片上传（需认证，base64 JSON 上传） =====
@@ -510,8 +669,26 @@ export async function handleApi(req, res, db, { verifyJwt, readBody, json }) {
   json(res, 404, { error: 'Not found' })
 }
 
-function generateSlug(title, db) {
-  let base = title
+// datetime-local (YYYY-MM-DDTHH:mm) → SQLite 格式；空值返回 null
+function normalizeSchedule(v) {
+  if (!v) return null
+  const s = String(v).replace('T', ' ')
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) ? `${s.slice(0, 16)}:00` : null
+}
+
+// 问题分词：英文单词 + 中文二元组/单字
+function extractTerms(q) {
+  const terms = new Set()
+  for (const w of q.toLowerCase().match(/[a-z][a-z0-9.+-]{1,}/g) || []) terms.add(w)
+  const cjk = q.match(/[\u4e00-\u9fff]+/g) || []
+  for (const seg of cjk) {
+    if (seg.length === 1) { terms.add(seg); continue }
+    for (let i = 0; i < seg.length - 1; i++) terms.add(seg.slice(i, i + 2))
+  }
+  return [...terms].filter(t => t.length >= 2)
+}
+
+function generateSlug(title, db) {  let base = title
     .toLowerCase()
     .replace(/[^a-z0-9\u4e00-\u9fff\s-]/g, '')
     .trim()

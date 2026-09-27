@@ -1,5 +1,5 @@
 import { site } from '../data.js'
-import { API_BASE } from '../api.js'
+import { API_BASE, fetchHotDays, fetchHotHistory } from '../api.js'
 
 function footerHTML() {
   return `
@@ -101,11 +101,57 @@ function renderHot(container) {
           <p style="color:var(--text-muted);padding:20px 0">加载中…</p>
         </div>
       </section>
+
+      <section class="hot-flat-section">
+        <h2 class="hot-flat-title">热搜历史快照 <span style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono);font-weight:normal">每天自动存档 · 回看过去</span></h2>
+        <div class="hot-history-days" id="hotHistoryDays"></div>
+        <div id="hotHistoryView"></div>
+      </section>
     </div>
     ${footerHTML()}
   `
 
   loadHot()
+  loadHotHistory()
+}
+
+// ===== 历史快照 =====
+async function loadHotHistory() {
+  const daysEl = document.querySelector('#hotHistoryDays')
+  const view = document.querySelector('#hotHistoryView')
+  if (!daysEl) return
+  try {
+    const { days } = await fetchHotDays()
+    if (!days.length) {
+      daysEl.innerHTML = '<p style="color:var(--text-muted);font-size:13px">还没有存档，服务运行到明天会自动存第一份。</p>'
+      return
+    }
+    daysEl.innerHTML = days.map((d, i) => `<button class="tool-btn hot-day-btn${i === 0 ? ' active' : ''}" data-day="${d}">${d.slice(5)}</button>`).join('')
+    daysEl.querySelectorAll('.hot-day-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        daysEl.querySelectorAll('.hot-day-btn').forEach(b => b.classList.toggle('active', b === btn))
+        view.innerHTML = '<p style="color:var(--text-muted);font-size:13px">加载中…</p>'
+        try {
+          const { sources } = await fetchHotHistory(btn.dataset.day)
+          view.innerHTML = `<div class="hot-grid">${Object.values(sources).map(src => `
+            <div class="hot-source-card">
+              <div class="hot-source-title"><span class="dot" style="background:${src.color || 'var(--accent)'}"></span>${src.name} · ${btn.dataset.day}</div>
+              ${(src.items || []).slice(0, 10).map(it => `
+                <a class="hot-item" href="${it.url || '#'}" target="_blank" rel="noopener">
+                  <span class="hot-rank">${it.rank}</span>
+                  <span class="hot-word">${(it.title || '').slice(0, 40)}</span>
+                </a>`).join('')}
+            </div>`).join('')}</div>`
+        } catch (err) {
+          view.innerHTML = `<p style="color:#e07070;font-size:13px">${err.message}</p>`
+        }
+      })
+    })
+    // 默认加载最近一天
+    daysEl.querySelector('.hot-day-btn')?.click()
+  } catch {
+    daysEl.innerHTML = '<p style="color:var(--text-muted);font-size:13px">历史快照加载失败</p>'
+  }
 }
 
 async function loadHot() {

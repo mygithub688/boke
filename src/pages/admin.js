@@ -2,9 +2,11 @@ import {
   fetchPosts, fetchTags, fetchStats, fetchAdminPosts,
   createPost, updatePost, deletePost, toggleDraft,
   createTag, deleteTag, logout, fetchMe, changePassword,
-  aiWrite, aiDigest, uploadImage, fetchAdminComments, deleteComment,
-  fetchLinks, createLink, deleteLink, fetchStatsChart
+  aiWrite, aiDigest, uploadImage, fetchAdminComments, deleteComment, approveComment,
+  fetchLinks, createLink, deleteLink, fetchStatsChart,
+  fetchWatch, addWatch, deleteWatch, fetchWatchMatches, exportData, importData
 } from '../api.js'
+import { markdownToHtml } from '../utils/markdown.js'
 
 function toast(msg, isError = false) {
   const el = document.createElement('div')
@@ -80,6 +82,17 @@ async function renderDashboard(container, user) {
             <span><i class="legend-dot" style="background:var(--accent)"></i>PV 浏览</span>
             <span><i class="legend-dot" style="background:var(--green)"></i>UV 独立访客</span>
           </div>
+        </div>
+        <div class="editor-panel" style="margin-top:24px">
+          <h2 style="font-family:var(--font-serif);font-size:18px;margin-bottom:16px">关键词盯梢 <span style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono)">Watch</span></h2>
+          <p class="form-hint" style="margin-bottom:12px">配置感兴趣的关键词，系统会在「AI 前沿」聚合的新内容里扫描命中情况。</p>
+          <div style="display:flex;gap:8px;margin-bottom:14px">
+            <input type="text" id="watchInput" placeholder="如 vllm / 4090 / agent…" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 12px" />
+            <button class="btn btn-primary" id="watchAddBtn" style="padding:8px 16px">添加</button>
+            <button class="btn btn-ghost" id="watchScanBtn">🔍 扫描命中</button>
+          </div>
+          <div id="watchList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+          <div id="watchMatches"></div>
         </div>
         <div id="dashContent"></div>
       </div>
@@ -204,6 +217,45 @@ async function renderDashboard(container, user) {
 
     // 图表数据
     fetchStatsChart().then(d => drawChart(d.chart)).catch(() => {})
+
+    // ===== 关键词盯梢 =====
+    const watchList = container.querySelector('#watchList')
+    async function loadWatch() {
+      try {
+        const { keywords } = await fetchWatch()
+        watchList.innerHTML = keywords.length ? keywords.map(k => `
+          <span class="watch-chip">${esc(k.keyword)}<span class="watch-del" data-id="${k.id}" title="移除">✕</span></span>`).join('')
+          : '<span style="color:var(--text-muted);font-size:13px">还没有关键词</span>'
+        watchList.querySelectorAll('.watch-del').forEach(el => {
+          el.addEventListener('click', async () => { try { await deleteWatch(el.dataset.id); loadWatch() } catch (e) { toast(e.message, true) } })
+        })
+      } catch {}
+    }
+    loadWatch()
+
+    container.querySelector('#watchAddBtn').addEventListener('click', async () => {
+      const input = container.querySelector('#watchInput')
+      const kw = input.value.trim()
+      if (!kw) return
+      try { await addWatch(kw); input.value = ''; loadWatch() } catch (e) { toast(e.message, true) }
+    })
+    container.querySelector('#watchScanBtn').addEventListener('click', async e => {
+      const btn = e.currentTarget
+      btn.disabled = true; btn.textContent = '扫描中…'
+      const box = container.querySelector('#watchMatches')
+      try {
+        const { matches } = await fetchWatchMatches()
+        box.innerHTML = matches.length ? `
+          <div class="watch-matches">${matches.map(m => `
+            <a class="watch-match" href="${esc(m.url || '#')}" target="_blank" rel="noopener">
+              <span class="watch-kw">${esc(m.keyword)}</span>
+              <span class="watch-title">${esc(m.title)}</span>
+              <span class="watch-src">${esc(m.source)}</span>
+            </a>`).join('')}</div>`
+          : '<p class="form-hint">当前聚合内容里没有命中关键词。</p>'
+      } catch (err) { box.innerHTML = `<p class="form-hint">${esc(err.message)}</p>` }
+      btn.disabled = false; btn.textContent = '🔍 扫描命中'
+    })
   } catch (err) {
     container.querySelector('#statsRow').innerHTML = `<div class="stat-card"><div class="stat-value" style="font-size:16px">加载失败</div><div class="stat-label">${esc(err.message)}</div></div>`
   }
@@ -238,7 +290,7 @@ async function renderPosts(container, user, { editingId = null } = {}) {
           <tbody>
             ${posts.map(p => `
               <tr>
-                <td class="post-title-cell">${esc(p.title)}</td>
+                <td class="post-title-cell">${esc(p.title)}${p.scheduled_at ? `<span class="sched-badge" title="定时发布">⏰ ${esc(p.scheduled_at.slice(0, 16))}</span>` : ''}</td>
                 <td><span class="tag">${esc(p.tag)}</span></td>
                 <td>${p.is_draft ? '<span class="draft-badge">草稿</span>' : '<span class="pub-badge">已发布</span>'}</td>
                 <td style="font-family:var(--font-mono);font-size:13px">${p.view_count || 0}</td>
@@ -318,7 +370,18 @@ async function renderPosts(container, user, { editingId = null } = {}) {
             <textarea name="excerpt" rows="3" placeholder="一两句话概括">${esc(post?.excerpt || '')}</textarea>
           </div>
           <div class="form-group">
-            <label>正文（HTML）</label>
+            <label>定时发布（可选）</label>
+            <input type="datetime-local" name="scheduledAt" value="${esc((post?.scheduled_at || '').slice(0, 16) || '')}" />
+            <p class="form-hint">设了时间后勾选"草稿"保存，到点自动转正式发布；留空 = 不定时</p>
+          </div>
+          <div class="form-group">
+            <label>正文
+              <span class="mode-switch">
+                <button type="button" class="tool-btn mode-btn active" data-mode="md">Markdown</button>
+                <button type="button" class="tool-btn mode-btn" data-mode="html">HTML</button>
+                <button type="button" class="tool-btn" id="previewBtn">👁 预览</button>
+              </span>
+            </label>
             <div class="editor-toolbar">
               <span class="toolbar-label">✦ AI 助手</span>
               <button type="button" class="tool-btn" data-ai="polish" title="润色正文">润色</button>
@@ -331,6 +394,8 @@ async function renderPosts(container, user, { editingId = null } = {}) {
               <input type="file" id="imgInput" accept="image/*" hidden />
             </div>
             <textarea name="body" rows="16" required>${esc(post?.body_html || '')}</textarea>
+            <div class="editor-preview article-body" id="editorPreview" hidden></div>
+            <p class="form-hint" id="autosaveInfo"></p>
           </div>
           <div class="form-group" style="display:flex;gap:20px;align-items:center">
             <label style="margin:0;display:flex;align-items:center;gap:6px">
@@ -427,25 +492,103 @@ async function renderPosts(container, user, { editingId = null } = {}) {
       imgInput.value = ''
     })
 
+    // ===== Markdown / HTML 双模式 + 预览 + 自动保存 =====
+    const editKey = `autosave-post-${isNew ? 'new' : editingId}`
+    let editorMode = isNew ? 'md' : 'html'   // 编辑旧文章默认 HTML（库里存的是 HTML）
+
+    const setMode = mode => {
+      editorMode = mode
+      form.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode))
+      hidePreview()
+    }
+    form.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => setMode(btn.dataset.mode))
+    })
+
+    const previewPanel = form.querySelector('#editorPreview')
+    let previewOn = false
+    function hidePreview() { previewOn = false; previewPanel.hidden = true; form.querySelector('#previewBtn').classList.remove('active') }
+    form.querySelector('#previewBtn').addEventListener('click', () => {
+      previewOn = !previewOn
+      previewPanel.hidden = !previewOn
+      form.querySelector('#previewBtn').classList.toggle('active', previewOn)
+      if (previewOn) renderPreview()
+    })
+    function renderPreview() {
+      const raw = bodyTa.value
+      previewPanel.innerHTML = editorMode === 'md' ? markdownToHtml(raw) : (raw || '<p style="color:var(--text-muted)">空</p>')
+    }
+
+    // 自动保存（2 秒防抖），误关浏览器也能找回
+    let saveTimer = null
+    const autosaveInfo = form.querySelector('#autosaveInfo')
+    function scheduleAutosave() {
+      clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => {
+        const fd = new FormData(form)
+        try {
+          localStorage.setItem(editKey, JSON.stringify({
+            title: fd.get('title'), tag: fd.get('tag'), excerpt: fd.get('excerpt'),
+            body: fd.get('body'), mode: editorMode, at: Date.now()
+          }))
+          autosaveInfo.textContent = `已自动保存于 ${new Date().toLocaleTimeString()}（未提交）`
+        } catch {}
+      }, 2000)
+    }
+    ;[bodyTa, titleInput, tagInput, excerptTa].forEach(el => el.addEventListener('input', () => { scheduleAutosave(); if (previewOn) renderPreview() }))
+
+    // 打开编辑器时检测本地草稿
+    try {
+      const saved = JSON.parse(localStorage.getItem(editKey) || 'null')
+      if (saved && saved.body && saved.body !== bodyTa.value) {
+        autosaveInfo.innerHTML = `检测到 ${new Date(saved.at).toLocaleString()} 的本地未保存草稿
+          <button type="button" class="tool-btn" id="restoreDraft">恢复</button>
+          <button type="button" class="tool-btn" id="discardDraft">丢弃</button>`
+        form.querySelector('#restoreDraft').addEventListener('click', () => {
+          titleInput.value = saved.title || titleInput.value
+          tagInput.value = saved.tag || tagInput.value
+          excerptTa.value = saved.excerpt || excerptTa.value
+          bodyTa.value = saved.body
+          setMode(saved.mode || 'md')
+          autosaveInfo.textContent = '已恢复本地草稿'
+        })
+        form.querySelector('#discardDraft').addEventListener('click', () => {
+          localStorage.removeItem(editKey)
+          autosaveInfo.textContent = ''
+        })
+      }
+    } catch {}
+
     form.addEventListener('submit', async e => {
       e.preventDefault()
       const fd = new FormData(form)
+      let bodyContent = fd.get('body')
+      // Markdown 模式提交时转换为 HTML
+      if (editorMode === 'md') {
+        bodyContent = markdownToHtml(bodyContent)
+        if (!/<[a-z][\s\S]*>/i.test(bodyContent)) {
+          toast('正文是空的', true)
+          return
+        }
+      }
       const data = {
         title: fd.get('title').trim(),
         tag: fd.get('tag').trim(),
         excerpt: fd.get('excerpt')?.trim() || '',
-        body: fd.get('body'),
+        body: bodyContent,
         isFeatured: fd.get('featured') === 'on',
-        isDraft: fd.get('draft') === 'on'
+        isDraft: fd.get('draft') === 'on',
+        scheduledAt: fd.get('scheduledAt') || null
       }
       try {
         if (isNew) {
           await createPost(data)
-          toast('文章已创建')
+          toast(data.scheduledAt && data.isDraft ? '文章已创建，到点将自动发布' : '文章已创建')
         } else {
           await updatePost(post.id, data)
           toast('文章已更新')
         }
+        localStorage.removeItem(editKey)
         window.location.hash = '/admin/posts'
       } catch (err) {
         toast(err.message, true)
@@ -538,10 +681,52 @@ async function renderSettings(container, user) {
             </tbody>
           </table>
         </div>
+
+        <div class="editor-panel" style="max-width:420px;margin-top:24px">
+          <h2 style="font-family:var(--font-serif);font-size:18px;margin-bottom:16px">数据备份</h2>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="exportBtn">⬇ 导出全站 JSON</button>
+            <button class="btn btn-ghost" id="importBtn">⬆ 导入备份文件</button>
+            <input type="file" id="importFile" accept=".json" hidden />
+          </div>
+          <p class="form-hint" style="margin-top:10px">导出含全部文章/评论/友链/关键词。导入时可选择合并（跳过重复）或替换（清空现有内容）。</p>
+        </div>
       </div>
     </div>
   `
   document.querySelector('#logoutBtn').addEventListener('click', () => { logout(); window.location.hash = '/' })
+
+  // 导出：下载 JSON
+  container.querySelector('#exportBtn').addEventListener('click', async () => {
+    try {
+      const data = await exportData()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `hana-blog-backup-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(a.href)
+      toast('备份已下载')
+    } catch (err) { toast(err.message, true) }
+  })
+
+  // 导入：选择文件 → 选择模式 → 确认
+  container.querySelector('#importBtn').addEventListener('click', () => container.querySelector('#importFile').click())
+  container.querySelector('#importFile').addEventListener('change', async e => {
+    const file = e.target.files[0]
+    if (!file) return
+    let payload
+    try { payload = JSON.parse(await file.text()) }
+    catch { toast('不是有效的 JSON 文件', true); return }
+    if (payload.app !== 'hana-blog') { toast('不是本博客的备份文件', true); return }
+    const mode = confirm('确定导入吗？\n\n「确定」= 替换模式（清空现有内容后导入）\n「取消」= 合并模式（跳过已存在的内容）') ? 'replace' : 'merge'
+    if (mode === 'replace' && !confirm('替换模式会清空现有全部文章和评论，确认继续？')) return
+    try {
+      const r = await importData(payload, mode)
+      toast(`导入完成：文章 ${r.posts} / 评论 ${r.comments} / 友链 ${r.links}（${r.mode}）`)
+    } catch (err) { toast(err.message, true) }
+    e.target.value = ''
+  })
 
   container.querySelector('#pwdForm')?.addEventListener('submit', async e => {
     e.preventDefault()
@@ -565,6 +750,12 @@ async function renderComments(container, user) {
       ${sidebarHTML(user, 'comments')}
       <div class="admin-main">
         <h1>评论管理</h1>
+        <div class="cmt-filter" id="cmtFilter">
+          <button class="tool-btn active" data-f="all">全部</button>
+          <button class="tool-btn" data-f="ok">正常</button>
+          <button class="tool-btn" data-f="pending">待审</button>
+          <button class="tool-btn" data-f="spam">垃圾</button>
+        </div>
         <div id="contentArea"><p style="color:var(--text-muted)">加载中…</p></div>
       </div>
     </div>
@@ -572,33 +763,66 @@ async function renderComments(container, user) {
   document.querySelector('#logoutBtn').addEventListener('click', () => { logout(); window.location.hash = '/' })
 
   const content = container.querySelector('#contentArea')
-  try {
-    const { comments } = await fetchAdminComments()
-    content.innerHTML = comments.length ? `
+  let all = []
+  let filter = 'all'
+
+  const STATUS_BADGE = { ok: '<span class="pub-badge">正常</span>', pending: '<span class="draft-badge">待审</span>', spam: '<span class="draft-badge" style="color:#e07070">垃圾</span>' }
+
+  async function load() {
+    try {
+      const d = await fetchAdminComments()
+      all = d.comments
+      render()
+    } catch (err) {
+      content.innerHTML = `<p style="color:#e07070">${esc(err.message)}</p>`
+    }
+  }
+
+  function render() {
+    const list = filter === 'all' ? all : all.filter(c => (c.status || 'ok') === filter)
+    content.innerHTML = list.length ? `
       <table class="admin-table">
-        <thead><tr><th>内容</th><th>昵称</th><th>文章</th><th>时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>内容</th><th>昵称</th><th>状态</th><th>文章</th><th>时间</th><th>操作</th></tr></thead>
         <tbody>
-          ${comments.map(c => `
+          ${list.map(c => `
             <tr>
-              <td style="max-width:360px">${esc(c.content)}</td>
+              <td style="max-width:320px">${esc(c.content)}</td>
               <td>${esc(c.nickname)}</td>
+              <td>${STATUS_BADGE[c.status || 'ok']}</td>
               <td class="post-title-cell"><a href="#/post/${esc(c.post_slug || '')}">${esc(c.post_title || '已删除')}</a></td>
               <td style="font-family:var(--font-mono);font-size:12px">${(c.created_at || '').replace('T', ' ').slice(0, 16)}</td>
-              <td><button class="action-btn danger" data-id="${c.id}">删除</button></td>
+              <td>
+                <div class="action-btns">
+                  ${(c.status || 'ok') !== 'ok' ? `<button class="action-btn" data-action="approve" data-id="${c.id}">通过</button>` : ''}
+                  <button class="action-btn danger" data-action="delete" data-id="${c.id}">删除</button>
+                </div>
+              </td>
             </tr>`).join('')}
         </tbody>
-      </table>` : '<div class="empty-state"><div class="icon">∅</div><p>还没有评论</p></div>'
+      </table>` : '<div class="empty-state"><div class="icon">∅</div><p>没有符合条件的评论</p></div>'
 
-    content.querySelectorAll('button[data-id]').forEach(btn => {
+    content.querySelectorAll('button[data-action]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('确定删除这条评论？')) return
-        try { await deleteComment(btn.dataset.id); toast('已删除'); renderComments(container, user) }
-        catch (err) { toast(err.message, true) }
+        if (btn.dataset.action === 'approve') {
+          try { await approveComment(btn.dataset.id); toast('已放行'); load() }
+          catch (err) { toast(err.message, true) }
+        } else {
+          if (!confirm('确定删除这条评论？')) return
+          try { await deleteComment(btn.dataset.id); toast('已删除'); load() }
+          catch (err) { toast(err.message, true) }
+        }
       })
     })
-  } catch (err) {
-    content.innerHTML = `<p style="color:#e07070">${esc(err.message)}</p>`
   }
+
+  container.querySelectorAll('#cmtFilter [data-f]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      filter = btn.dataset.f
+      container.querySelectorAll('#cmtFilter [data-f]').forEach(b => b.classList.toggle('active', b === btn))
+      render()
+    })
+  })
+  load()
 }
 
 // ===== 友链管理 =====
