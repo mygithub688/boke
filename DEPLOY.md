@@ -176,7 +176,8 @@ sudo systemctl status blog
 
 | 文件 | 说明 |
 |---|---|
-| `server/blog.db` | 全部数据（文章/标签/用户），SQLite 单文件 |
+| `server/blog.db` | 全部数据（文章/标签/用户/评论/友链/统计），SQLite 单文件 |
+| `uploads/` | 上传的图片，随库一起备份 |
 | `server/blog.db-wal` / `-shm` | SQLite 预写日志，备份前建议先停服务或 `pm2 stop` |
 
 备份 = 停服务后把 `server/blog.db` 拷走；恢复 = 放回原位置再启动。

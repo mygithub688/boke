@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { createDb } from './db.js'
 import { handleAuth } from './auth.js'
 import { handleApi } from './api.js'
+import { scheduleDailyDigest } from './aidigest.js'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -10,7 +11,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = path.join(__dirname, '..')
 const DIST_DIR = path.join(PROJECT_ROOT, 'dist')
 const PUBLIC_DIR = path.join(PROJECT_ROOT, 'public')
+const UPLOAD_DIR = path.join(PROJECT_ROOT, 'uploads')
 const PORT = process.env.PORT || 3001
+const SITE_URL = (process.env.SITE_URL || `http://localhost:${PORT}`).replace(/\/$/, '')
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -113,26 +116,56 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  // RSS 订阅
+  if (pathname === '/feed.xml' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' })
+    return res.end(buildFeed(db, req.headers.host || `localhost:${PORT}`))
+  }
+
   // 静态文件：单进程伺服前端
   // 有 dist/ 构建产物优先用（npm run build 后），否则直接伺服源码（免构建）
   let rel = pathname === '/' ? '/index.html' : pathname
   try { rel = decodeURIComponent(rel) } catch { /* 保持原样 */ }
   const useDist = fs.existsSync(path.join(DIST_DIR, 'index.html'))
-  const candidates = useDist
-    ? [path.join(DIST_DIR, rel)]
-    : [path.join(PUBLIC_DIR, rel), path.join(PROJECT_ROOT, rel)]
+  const candidates = []
+  if (rel.startsWith('/uploads/')) {
+    candidates.push(path.join(UPLOAD_DIR, rel.slice('/uploads/'.length)))
+  } else {
+    if (!useDist) candidates.push(path.join(PUBLIC_DIR, rel))
+    candidates.push(path.join(useDist ? DIST_DIR : PROJECT_ROOT, rel))
+  }
 
   for (const file of candidates) {
     const resolved = path.resolve(file)
-    const allowed = useDist
-      ? resolved.startsWith(DIST_DIR + path.sep)
-      : resolved.startsWith(PUBLIC_DIR + path.sep) || resolved.startsWith(PROJECT_ROOT + path.sep)
+    let allowed
+    if (resolved.startsWith(UPLOAD_DIR + path.sep)) {
+      allowed = true
+    } else if (useDist) {
+      allowed = resolved.startsWith(DIST_DIR + path.sep)
+    } else {
+      // 源码模式白名单：只允许 index.html、src/、public/
+      allowed =
+        resolved === path.join(PROJECT_ROOT, 'index.html') ||
+        resolved.startsWith(path.join(PROJECT_ROOT, 'src') + path.sep) ||
+        resolved.startsWith(PUBLIC_DIR + path.sep)
+    }
     if (!allowed) continue
     let stat
     try { stat = fs.statSync(resolved) } catch { continue }
     if (!stat.isFile()) continue
     const ext = path.extname(resolved).toLowerCase()
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' })
+    // 协商缓存：文件变了才重新下载
+    const etag = `W/"${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' })
+      return res.end()
+    }
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Content-Length': stat.size,
+      ETag: etag,
+      'Cache-Control': 'no-cache'
+    })
     fs.createReadStream(resolved).pipe(res)
     return
   }
@@ -149,4 +182,45 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`[server] Blog running at http://localhost:${PORT} (前端 + API 单进程)`)
+  scheduleDailyDigest(db)
 })
+
+// RSS 2.0 订阅源
+function xmlEsc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+}
+
+function buildFeed(db, host) {
+  const siteUrl = process.env.SITE_URL || `http://${host}`
+  const posts = db.prepare(
+    'SELECT title, slug, excerpt, body_html, created_at FROM posts WHERE is_draft = 0 ORDER BY created_at DESC LIMIT 20'
+  ).all()
+
+  const items = posts.map(p => {
+    const plain = p.excerpt || String(p.body_html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
+    const url = `${siteUrl}/#/post/${p.slug}`
+    const rfc822 = new Date((p.created_at || '').replace(' ', 'T') + 'Z').toUTCString()
+    return `    <item>
+      <title>${xmlEsc(p.title)}</title>
+      <link>${xmlEsc(url)}</link>
+      <guid isPermaLink="true">${xmlEsc(url)}</guid>
+      <pubDate>${rfc822}</pubDate>
+      <description>${xmlEsc(plain)}</description>
+    </item>`
+  }).join('\n')
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>指挥官的个人博客</title>
+    <link>${xmlEsc(siteUrl)}</link>
+    <description>技术、硬件与思考 · 指挥官的博客</description>
+    <language>zh-CN</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+    <atom:link href="${xmlEsc(siteUrl)}/feed.xml" rel="self" type="application/rss+xml" />
+${items}
+  </channel>
+</rss>`
+}

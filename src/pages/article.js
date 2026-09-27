@@ -1,6 +1,7 @@
 import { postCard } from '../components/postCard.js'
 import { site } from '../data.js'
-import { fetchPost, likePost, unlikePost, bookmarkPost, unbookmarkPost, fetchPostStats, getUserKey } from '../api.js'
+import { fetchPost, likePost, unlikePost, bookmarkPost, unbookmarkPost, fetchPostStats, getUserKey, aiSummary, fetchComments, addComment, deleteComment } from '../api.js'
+import { highlightArticleCode } from '../utils/highlight.js'
 
 function footerHTML() {
   return `
@@ -28,6 +29,123 @@ function esc(s) {
   const d = document.createElement('div')
   d.textContent = s
   return d.innerHTML
+}
+
+// AI 摘要卡片：有缓存直接展示，否则给生成按钮
+function aiSummaryHtml(post) {
+  const slug = esc(post.slug)
+  if (post.ai_summary) {
+    return `
+      <div class="ai-summary" id="aiSummaryBox">
+        <div class="ai-summary-head">
+          <span class="ai-spark">✦</span> AI 摘要
+          <span class="ai-summary-meta">由本地大模型生成</span>
+        </div>
+        <p>${esc(post.ai_summary)}</p>
+      </div>`
+  }
+  return `
+    <div class="ai-summary" id="aiSummaryBox">
+      <div class="ai-summary-head">
+        <span class="ai-spark">✦</span> AI 摘要
+        <span class="ai-summary-meta">由本地大模型生成</span>
+      </div>
+      <p class="ai-summary-empty" id="aiSummaryEmpty">
+        这篇文章还没有 AI 摘要。
+        <button class="btn btn-ghost ai-gen-btn" id="aiGenBtn">✦ 生成摘要</button>
+      </p>
+    </div>`
+}
+
+function bindAiSummary(container, post) {
+  const btn = container.querySelector('#aiGenBtn')
+  if (!btn) return
+  btn.addEventListener('click', async () => {
+    const box = container.querySelector('#aiSummaryEmpty')
+    btn.disabled = true
+    box.innerHTML = '<span class="ai-loading">✦ 本地大模型正在阅读全文，生成摘要中…</span>'
+    try {
+      const { summary } = await aiSummary(post.slug)
+      box.outerHTML = `<p>${esc(summary)}</p>`
+    } catch (err) {
+      box.innerHTML = `摘要生成失败：${esc(err.message)} <button class="btn btn-ghost ai-gen-btn" id="aiGenBtn">重试</button>`
+      bindAiSummary(container, post)
+    }
+  })
+}
+
+// ===== 评论区 =====
+function commentsHtml(total) {
+  return `
+    <section class="comments" id="commentsSection">
+      <div class="section-label">
+        <h2>评论</h2>
+        <span class="en" id="commentTotal">${total}</span>
+      </div>
+      <form class="comment-form" id="commentForm">
+        <div class="comment-form-row">
+          <input type="text" name="nickname" placeholder="昵称（必填）" maxlength="30" required />
+        </div>
+        <textarea name="content" rows="3" placeholder="说点什么…" maxlength="1000" required></textarea>
+        <div class="comment-form-actions">
+          <button type="submit" class="btn btn-primary">发表评论</button>
+        </div>
+      </form>
+      <div class="comment-list" id="commentList">
+        <p class="comment-empty">加载中…</p>
+      </div>
+    </section>`
+}
+
+function commentItemHtml(c) {
+  const canDelete = !!localStorage.getItem('blog-token')
+  return `
+    <div class="comment-item" data-id="${c.id}">
+      <div class="comment-head">
+        <span class="comment-avatar">${esc(c.nickname.slice(0, 1).toUpperCase())}</span>
+        <span class="comment-nick">${esc(c.nickname)}</span>
+        <span class="comment-time">${(c.created_at || '').replace('T', ' ').slice(0, 16)}</span>
+        ${canDelete ? '<span class="comment-del" title="删除">✕</span>' : ''}
+      </div>
+      <div class="comment-body">${esc(c.content)}</div>
+    </div>`
+}
+
+function bindComments(container, postId) {
+  const list = container.querySelector('#commentList')
+  const totalEl = container.querySelector('#commentTotal')
+
+  async function load() {
+    try {
+      const { comments, total } = await fetchComments(postId)
+      totalEl.textContent = total
+      list.innerHTML = comments.length
+        ? comments.map(commentItemHtml).join('')
+        : '<p class="comment-empty">还没有评论，坐个沙发？</p>'
+      list.querySelectorAll('.comment-del').forEach(el => {
+        el.addEventListener('click', async () => {
+          if (!confirm('确定删除这条评论？')) return
+          try { await deleteComment(el.closest('.comment-item').dataset.id); load() }
+          catch (err) { alert(err.message) }
+        })
+      })
+    } catch {
+      list.innerHTML = '<p class="comment-empty">评论加载失败</p>'
+    }
+  }
+  load()
+
+  container.querySelector('#commentForm').addEventListener('submit', async e => {
+    e.preventDefault()
+    const fd = new FormData(e.target)
+    try {
+      await addComment(postId, { nickname: fd.get('nickname').trim(), content: fd.get('content').trim() })
+      e.target.reset()
+      load()
+    } catch (err) {
+      alert(err.message)
+    }
+  })
 }
 
 // 从 HTML 中提取 h2/h3 生成目录
@@ -85,6 +203,7 @@ function renderArticle(container, { id }) {
             <h1 class="article-title">${esc(post.title)}</h1>
             <p class="article-lead">${esc(post.excerpt)}</p>
           </div>
+          ${aiSummaryHtml(post)}
           <div class="article-body anim-fade" id="articleBody">${post.body_html}</div>
 
           <div class="article-actions">
@@ -115,6 +234,8 @@ function renderArticle(container, { id }) {
               ${related.map(p => postCard(p)).join('')}
             </div>
           </section>
+
+          ${commentsHtml(0)}
         </div>
         <aside class="article-toc">
           ${tocHtml}
@@ -126,6 +247,9 @@ function renderArticle(container, { id }) {
     // 给 h2/h3 加 id
     const body = container.querySelector('#articleBody')
     if (body) {
+      // 代码高亮
+      highlightArticleCode(body)
+
       const headings = body.querySelectorAll('h2, h3')
       headings.forEach((h, i) => { h.id = `toc-${i}` })
 
@@ -218,6 +342,10 @@ function renderArticle(container, { id }) {
       bar.style.width = (total > 0 ? (h.scrollTop / total) * 100 : 0) + '%'
     }
     window.addEventListener('scroll', onProgress, { passive: true })
+
+    // AI 摘要 + 评论区
+    bindAiSummary(container, post)
+    bindComments(container, post.id)
 
     return function cleanup() {
       window.removeEventListener('scroll', onScroll)

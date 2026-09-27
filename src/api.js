@@ -82,4 +82,30 @@ export function deleteTag(id) { return api(`/api/tags/${id}`, 'DELETE') }
 export function fetchStats() { return api('/api/stats') }
 export function fetchAdminPosts() { return api('/api/admin/posts') }
 
+// ===== 评论 =====
+export function fetchComments(postId) { return api(`/api/posts/${postId}/comments`) }
+export function addComment(postId, { nickname, content }) {
+  return api(`/api/posts/${postId}/comments`, 'POST', { nickname, content, user_key: getUserKey() })
+}
+export function deleteComment(id) { return api(`/api/comments/${id}`, 'DELETE') }
+export function fetchAdminComments() { return api('/api/admin/comments') }
+
+// ===== 归档 / 友链 =====
+export function fetchArchive() { return api('/api/archive') }
+export function fetchLinks() { return api('/api/links') }
+export function createLink(data) { return api('/api/links', 'POST', data) }
+export function deleteLink(id) { return api(`/api/links/${id}`, 'DELETE') }
+
+// ===== 访问统计 =====
+export function trackVisit(path) { return api('/api/track', 'POST', { user_key: getUserKey(), path }) }
+export function fetchStatsChart() { return api('/api/stats/chart') }
+
+// ===== 本地 AI =====
+export function aiSummary(slug) { return api('/api/ai/summary', 'POST', { slug }) }
+export function aiWrite(action, content) { return api('/api/ai/write', 'POST', { action, content }) }
+export function aiDigest() { return api('/api/ai/digest', 'POST') }
+
+// ===== 图片上传 =====
+export function uploadImage(name, dataUrl) { return api('/api/upload', 'POST', { name, data: dataUrl }) }
+
 export { getToken, setToken, clearToken, getUserKey }

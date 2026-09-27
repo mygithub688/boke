@@ -103,25 +103,24 @@ async function fetchZhihu() {
 }
 
 async function fetchWeibo() {
-  // 微博需要 visitor cookie，尝试通过 m.weibo.cn
-  const text = await fetchUrl('https://m.weibo.cn/api/container/getIndex?containerid=106003type%3D25%26t%3D3%26disable_hot%3D1%26launch_time%3D0', {
-    'Referer': 'https://m.weibo.cn/'
-  })
-  const d = JSON.parse(text)
-  const groups = d?.data?.cards || []
-  for (const g of groups) {
-    const cards = g.card_group || []
-    if (cards.length > 3) {
-      return cards.map((c, i) => ({
-        rank: i + 1,
-        title: c.desc?.content || c.desc || '',
-        hot: c.desc?.content || '',
-        url: c.scheme?.replace('sinaurl', 'https://s.weibo.com/weibo') || `https://s.weibo.com/weibo/${c.mid}`,
-        label: c.desc?.content?.replace(/[^#\u4e00-\u9fff]/g, '') || ''
-      }))
+  // 微博官方接口有严格反爬（432/需访客 cookie），改用今日热榜的微博页解析
+  const html = await fetchUrl('https://tophub.today/n/KqndgxeLl9')
+  const rows = [...html.matchAll(
+    /<td align="center">(\d+)\.?<\/td>\s*<td><a href="([^"]+)"[^>]*>([^<]+)<\/a><\/td>\s*<td class="ws">([^<]*)<\/td>/g
+  )]
+  return rows.slice(0, 30).map((m, i) => {
+    const raw = m[4].trim()
+    const num = parseFloat(raw)
+    // "203万" → 2030000，参与跨平台热度排序
+    const hot = /万/.test(raw) && !isNaN(num) ? Math.round(num * 10000) : (isNaN(num) ? 0 : num)
+    return {
+      rank: i + 1,
+      title: m[3].trim(),
+      hot,
+      url: m[2].startsWith('http') ? m[2] : `https://s.weibo.com${m[2]}`,
+      label: ''
     }
-  }
-  return []
+  })
 }
 
 // ===== 聚合 =====

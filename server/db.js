@@ -58,16 +58,49 @@ export async function createDb() {
       UNIQUE(post_id, user_key)
     );
 
+    CREATE TABLE IF NOT EXISTS comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER NOT NULL,
+      user_key TEXT DEFAULT '',
+      nickname TEXT NOT NULL,
+      content TEXT NOT NULL,
+      ip TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS friend_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      sort INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS visits (
+      day TEXT NOT NULL,
+      user_key TEXT NOT NULL,
+      PRIMARY KEY (day, user_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS stats_daily (
+      day TEXT PRIMARY KEY,
+      pv INTEGER DEFAULT 0
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_tag ON posts(tag);
     CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_draft ON posts(is_draft);
     CREATE INDEX IF NOT EXISTS idx_likes_user ON likes(user_key);
     CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_key);
+    CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id);
   `)
 
   // 兼容旧库：补加新字段
   try { db.prepare('ALTER TABLE posts ADD COLUMN is_draft INTEGER DEFAULT 0').run() } catch {}
   try { db.prepare('ALTER TABLE posts ADD COLUMN view_count INTEGER DEFAULT 0').run() } catch {}
+  try { db.prepare('ALTER TABLE posts ADD COLUMN ai_summary TEXT').run() } catch {}
+  try { db.prepare('ALTER TABLE posts ADD COLUMN ai_summary_at TEXT').run() } catch {}
 
   // 种子数据（首次运行）
   const count = db.prepare('SELECT COUNT(*) as n FROM posts').get()

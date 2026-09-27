@@ -6,6 +6,8 @@ const routes = {
   '/about': () => import('./pages/about.js'),
   '/hot': () => import('./pages/hot.js'),
   '/ainews': () => import('./pages/ainews.js'),
+  '/archive': () => import('./pages/archive.js'),
+  '/links': () => import('./pages/links.js'),
   '/search': () => import('./pages/search.js'),
   '/login': () => import('./pages/auth.js'),
   '/register': () => import('./pages/auth.js'),
@@ -14,6 +16,8 @@ const routes = {
   '/admin/posts/new': () => import('./pages/admin.js'),
   '/admin/posts/:id': () => import('./pages/admin.js'),
   '/admin/tags': () => import('./pages/admin.js'),
+  '/admin/comments': () => import('./pages/admin.js'),
+  '/admin/links': () => import('./pages/admin.js'),
   '/admin/settings': () => import('./pages/admin.js'),
 }
 
@@ -73,14 +77,20 @@ export async function render() {
   const params = { ...route.params }
   if (key === '/admin') params.sub = 'dashboard'
   else if (key === '/admin/posts') params.sub = 'posts'
+  else if (key === '/admin/posts/new') { params.sub = 'posts'; params.id = 'new' }
   else if (key === '/admin/posts/:id') { params.sub = 'posts'; params.id = params.id }
   else if (key === '/admin/tags') params.sub = 'tags'
+  else if (key === '/admin/comments') params.sub = 'comments'
+  else if (key === '/admin/links') params.sub = 'links'
   else if (key === '/admin/settings') params.sub = 'settings'
 
   const cleanup = C.render(app, params)
   if (typeof cleanup === 'function') currentComponent.cleanup = cleanup
 
   window.scrollTo(0, 0)
+
+  // PV/UV 埋点（每次路由切换记一次）
+  import('./api.js').then(({ trackVisit }) => trackVisit(key).catch(() => {}))
 
   // 页面渲染后触发动态特效
   requestAnimationFrame(onPageRender)

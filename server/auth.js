@@ -1,4 +1,8 @@
 import { hashPassword, verifyPassword } from './db.js'
+import { createRateLimiter } from './ratelimit.js'
+
+// 登录防爆破：每 IP 15 分钟最多 10 次尝试
+const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 })
 
 export async function handleAuth(req, res, db, { signJwt, verifyJwt, readBody, json }) {
   const url = new URL(req.url, 'http://localhost')
@@ -25,6 +29,10 @@ export async function handleAuth(req, res, db, { signJwt, verifyJwt, readBody, j
 
   // POST /api/auth/login
   if (pathname === '/api/auth/login' && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim()
+    if (!loginLimiter(ip)) {
+      return json(res, 429, { error: '尝试次数过多，请 15 分钟后再试' })
+    }
     const body = await readBody(req)
     const { username, password } = body
     if (!username || !password) return json(res, 400, { error: 'username 和 password 必填' })

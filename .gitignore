@@ -7,3 +7,4 @@ server/blog.db-wal
 Thumbs.db
 *.log
 push_to_github.py
+uploads/
