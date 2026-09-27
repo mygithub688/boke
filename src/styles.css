@@ -2667,3 +2667,41 @@ img { display: block; max-width: 100%; }
 
 /* 修复：hidden 属性被 .askai-panel 的 display:flex 覆盖，导致面板关不掉 */
 .askai-panel[hidden] { display: none !important; }
+
+/* ============================================================
+   移动端适配修复：防止长代码行/长词撑破布局
+   ============================================================ */
+
+/* 代码块在窄屏内横向滚动，而不是撑破容器 */
+.article-body pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.article-body pre code { white-space: pre; }
+
+/* 文章网格允许收缩（grid item 默认 min-width:auto 会拒绝变窄） */
+@media (max-width: 900px) {
+  .article-layout { grid-template-columns: minmax(0, 1fr); }
+  .article-layout > .page { min-width: 0; }
+}
+
+@media (max-width: 768px) {
+  .page { padding-left: 16px; padding-right: 16px; }
+  .post-meta { flex-wrap: wrap; row-gap: 4px; }
+  .article-title { font-size: 26px; }
+  .hot-title-big { font-size: 32px; }
+  .archive-hero h1, .links-hero h1 { font-size: 28px; }
+  .comment-body { padding-left: 0; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  /* 表格在窄屏可横向滑动 */
+  .admin-table-wrap, .admin-main { overflow-x: auto; }
+  .editor-preview { max-height: 300px; }
+  .askai-panel { right: 12px; bottom: 136px; }
+  .askai-btn { right: 12px; bottom: 84px; }
+}
+
+/* 文章页移动端：改用块级堆叠，避免 auto margin + pre 内容宽度互相撑破 */
+@media (max-width: 900px) {
+  .article-layout { display: block; }
+  .article-layout > .page { width: auto; max-width: 100%; }
+}
