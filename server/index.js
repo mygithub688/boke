@@ -3,10 +3,32 @@ import { createDb } from './db.js'
 import { handleAuth } from './auth.js'
 import { handleApi } from './api.js'
 import path from 'node:path'
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const PROJECT_ROOT = path.join(__dirname, '..')
+const DIST_DIR = path.join(PROJECT_ROOT, 'dist')
+const PUBLIC_DIR = path.join(PROJECT_ROOT, 'public')
 const PORT = process.env.PORT || 3001
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8'
+}
 
 // 初始化数据库
 const db = await createDb()
@@ -91,13 +113,40 @@ const server = createServer(async (req, res) => {
     return
   }
 
-  // 静态文件（前端 build 产物或 vite dev）
-  // 开发模式下 Vite 跑在 5173，这里只处理 API
-  // 生产模式下可以加静态文件服务
+  // 静态文件：单进程伺服前端
+  // 有 dist/ 构建产物优先用（npm run build 后），否则直接伺服源码（免构建）
+  let rel = pathname === '/' ? '/index.html' : pathname
+  try { rel = decodeURIComponent(rel) } catch { /* 保持原样 */ }
+  const useDist = fs.existsSync(path.join(DIST_DIR, 'index.html'))
+  const candidates = useDist
+    ? [path.join(DIST_DIR, rel)]
+    : [path.join(PUBLIC_DIR, rel), path.join(PROJECT_ROOT, rel)]
+
+  for (const file of candidates) {
+    const resolved = path.resolve(file)
+    const allowed = useDist
+      ? resolved.startsWith(DIST_DIR + path.sep)
+      : resolved.startsWith(PUBLIC_DIR + path.sep) || resolved.startsWith(PROJECT_ROOT + path.sep)
+    if (!allowed) continue
+    let stat
+    try { stat = fs.statSync(resolved) } catch { continue }
+    if (!stat.isFile()) continue
+    const ext = path.extname(resolved).toLowerCase()
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' })
+    fs.createReadStream(resolved).pipe(res)
+    return
+  }
+
+  // 未命中：无扩展名的路径兜底回首页，其余 404
+  const fallback = path.join(useDist ? DIST_DIR : PROJECT_ROOT, 'index.html')
+  if (!path.extname(rel) && fs.existsSync(fallback)) {
+    res.writeHead(200, { 'Content-Type': MIME['.html'] })
+    fs.createReadStream(fallback).pipe(res)
+    return
+  }
   json(res, 404, { error: 'Not found' })
 })
 
 server.listen(PORT, () => {
-  console.log(`[server] API running at http://localhost:${PORT}`)
-  console.log(`[server] Blog frontend at http://localhost:5173`)
+  console.log(`[server] Blog running at http://localhost:${PORT} (前端 + API 单进程)`)
 })

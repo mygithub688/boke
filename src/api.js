@@ -1,5 +1,6 @@
 // 前端 API 客户端 + 认证状态
-export const API_BASE = 'http://localhost:3001'
+// 同源请求：单进程模式下页面和 API 同在 3001，Vite 开发模式走 vite.config.js 里的代理
+export const API_BASE = ''
 
 let token = localStorage.getItem('blog-token')
 

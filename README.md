@@ -16,12 +16,13 @@
 ## 快速启动
 
 ```bash
-# 终端 1：前端开发服务器
-npx vite --port 5173
-
-# 终端 2：后端 API
-node server/index.js
+# 单进程模式（推荐）：前端 + API 同端口
+npm start
 # → http://localhost:3001
+
+# 开发模式（可选）：前后端分开，支持热更新
+npx vite --port 5173   # 终端 1：前端（/api 自动代理到 3001）
+node server/index.js   # 终端 2：后端 API
 ```
 
 默认管理员：`admin` / `admin123`
