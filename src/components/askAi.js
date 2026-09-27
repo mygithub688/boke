@@ -31,6 +31,10 @@ function buildAskAi() {
     if (!panel.hidden) panel.querySelector('#askaiInput').focus()
   })
   panel.querySelector('.askai-close').addEventListener('click', () => { panel.hidden = true })
+  // Esc 关闭（焦点在面板内时）
+  panel.addEventListener('keydown', e => {
+    if (e.key === 'Escape') panel.hidden = true
+  })
 
   const body = panel.querySelector('#askaiBody')
   panel.querySelector('#askaiForm').addEventListener('submit', async e => {

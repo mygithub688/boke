@@ -2664,3 +2664,6 @@ img { display: block; max-width: 100%; }
 }
 .watch-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .watch-src { flex-shrink: 0; color: var(--text-muted); font-size: 11.5px; font-family: var(--font-mono); }
+
+/* 修复：hidden 属性被 .askai-panel 的 display:flex 覆盖，导致面板关不掉 */
+.askai-panel[hidden] { display: none !important; }
