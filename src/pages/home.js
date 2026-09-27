@@ -1,6 +1,6 @@
 import { site } from '../data.js'
 import { postCard } from '../components/postCard.js'
-import { fetchPosts } from '../api.js'
+import { fetchPosts, fetchTags, searchPosts } from '../api.js'
 
 function footerHTML() {
   return `
@@ -23,6 +23,20 @@ function footerHTML() {
     </footer>
   `
 }
+
+function skeletonCards(n = 6) {
+  return Array.from({ length: n }, () => `
+    <div class="post-card skeleton">
+      <div class="skeleton-line" style="width:40%"></div>
+      <div class="skeleton-line" style="width:85%"></div>
+      <div class="skeleton-line" style="width:100%"></div>
+      <div class="skeleton-line" style="width:70%"></div>
+      <div class="skeleton-line" style="width:50%"></div>
+    </div>
+  `).join('')
+}
+
+let state = { tag: null, page: 1, total: 0 }
 
 function renderHome(container) {
   const now = new Date()
@@ -56,9 +70,9 @@ function renderHome(container) {
           <span class="en">Latest Posts</span>
           <span class="count" id="postCount">…</span>
         </div>
-        <div class="post-grid" id="postGrid">
-          <p style="color:var(--text-muted);grid-column:1/-1;padding:40px 0;text-align:center">加载中…</p>
-        </div>
+        <div class="tag-filter" id="tagFilter"></div>
+        <div class="post-grid" id="postGrid">${skeletonCards(6)}</div>
+        <div class="pagination" id="pagination"></div>
       </section>
 
       <section id="tags">
@@ -74,41 +88,102 @@ function renderHome(container) {
     ${footerHTML()}
   `
 
-  // 从 API 拉取文章和标签
-  fetchPosts().then(({ posts: posts, tags: tagNames }) => {
-    const featured = posts.find(p => p.is_featured) || posts[0]
-    const rest = posts.filter(p => p.id !== featured?.id)
+  loadTags(container)
+  loadPosts(container, 1, null)
+}
 
-    container.querySelector('#postCount').textContent = `${posts.length} 篇`
-    container.querySelector('#postGrid').innerHTML = featured
-      ? postCard(featured, { featured: true }) + rest.map(p => postCard(p)).join('')
-      : '<p style="color:var(--text-muted);grid-column:1/-1">暂无文章</p>'
+function loadTags(container) {
+  fetchTags().then(({ tags }) => {
+    const el = container.querySelector('#tagsCloud')
+    if (!el) return
+    el.innerHTML = tags.filter(t => t.count > 0).map(t =>
+      `<a class="tag-pill" href="#/search?q=${encodeURIComponent(t.name)}">${t.name}<span class="n">${t.count}</span></a>`
+    ).join('')
 
-    // 标签：从 API 获取带计数的标签
-    fetchTagsData().then(tags => {
-      container.querySelector('#tagsCloud').innerHTML = tags.map(t =>
-        `<a class="tag-pill" href="#/search?q=${encodeURIComponent(t.name)}">${t.name}<span class="n">${t.count}</span></a>`
-      ).join('')
-    })
+    // 标签筛选条
+    const filter = container.querySelector('#tagFilter')
+    if (filter) {
+      filter.innerHTML = `<span class="tag-filter-item active" data-tag="">全部</span>` +
+        tags.filter(t => t.count > 0).map(t =>
+          `<span class="tag-filter-item" data-tag="${t.name}">${t.name}</span>`
+        ).join('')
+      filter.querySelectorAll('.tag-filter-item').forEach(item => {
+        item.addEventListener('click', () => {
+          filter.querySelectorAll('.tag-filter-item').forEach(i => i.classList.remove('active'))
+          item.classList.add('active')
+          const tag = item.dataset.tag || null
+          state.tag = tag
+          state.page = 1
+          loadPosts(container, 1, tag)
+        })
+      })
+    }
   }).catch(() => {
-    // API 不可用时回退到本地数据
-    import('../data.js').then(({ posts, tags }) => {
-      const featured = posts.find(p => p.featured) || posts[0]
-      const rest = posts.filter(p => p.id !== featured.id)
-      container.querySelector('#postCount').textContent = `${posts.length} 篇`
-      container.querySelector('#postGrid').innerHTML =
-        postCard(featured, { featured: true }) + rest.map(p => postCard(p)).join('')
-      container.querySelector('#tagsCloud').innerHTML = tags.map(t =>
-        `<a class="tag-pill" href="#/search?q=${encodeURIComponent(t.name)}">${t.name}<span class="n">${t.count}</span></a>`
-      ).join('')
-    })
+    const el = container.querySelector('#tagsCloud')
+    if (el) el.innerHTML = '<span style="color:var(--text-muted)">标签加载失败</span>'
   })
 }
 
-async function fetchTagsData() {
-  const res = await fetch('http://localhost:3001/api/tags')
-  const d = await res.json()
-  return d.tags
+function loadPosts(container, page, tag) {
+  state.page = page
+  state.tag = tag
+
+  const grid = container.querySelector('#postGrid')
+  const countEl = container.querySelector('#postCount')
+  const pagEl = container.querySelector('#pagination')
+  if (!grid) return
+
+  grid.innerHTML = skeletonCards(6)
+
+  fetchPosts({ tag, page, limit: 6 }).then(({ posts, total, pages }) => {
+    state.total = total
+    countEl.textContent = tag ? `${total} 篇（${tag}）` : `${total} 篇`
+
+    if (posts.length === 0) {
+      grid.innerHTML = '<p style="color:var(--text-muted);grid-column:1/-1;padding:40px 0;text-align:center">该标签下暂无文章</p>'
+    } else {
+      // 第一页第一篇为精选大图
+      const featuredIdx = (page === 1 && !tag) ? posts.findIndex(p => p.is_featured) : -1
+      let html = ''
+      if (featuredIdx >= 0) {
+        html += postCard(posts[featuredIdx], { featured: true })
+        posts.splice(featuredIdx, 1)
+      }
+      html += posts.map(p => postCard(p)).join('')
+      grid.innerHTML = html
+    }
+
+    // 分页
+    if (pages > 1) {
+      let pagHtml = ''
+      for (let i = 1; i <= pages; i++) {
+        pagHtml += `<span class="page-btn ${i === page ? 'active' : ''}" data-page="${i}">${i}</span>`
+      }
+      pagEl.innerHTML = `<div class="pagination-inner">${pagHtml}</div>`
+      pagEl.querySelectorAll('.page-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const p = parseInt(btn.dataset.page)
+          loadPosts(container, p, tag)
+          document.getElementById('latest')?.scrollIntoView({ behavior: 'smooth' })
+        })
+      })
+    } else {
+      pagEl.innerHTML = ''
+    }
+  }).catch(() => {
+    // API 不可用：回退本地数据
+    import('../data.js').then(({ posts, tags }) => {
+      let filtered = posts
+      if (tag) filtered = posts.filter(p => p.tag === tag)
+      countEl.textContent = `${filtered.length} 篇`
+      const featured = filtered.find(p => p.featured) || filtered[0]
+      const rest = filtered.filter(p => p.id !== featured?.id)
+      grid.innerHTML = featured
+        ? postCard(featured, { featured: true }) + rest.map(p => postCard(p)).join('')
+        : '<p style="color:var(--text-muted);grid-column:1/-1">暂无文章</p>'
+      pagEl.innerHTML = ''
+    })
+  })
 }
 
 export default {

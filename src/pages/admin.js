@@ -1,7 +1,7 @@
 import {
-  fetchPosts, fetchTags, fetchStats,
-  createPost, updatePost, deletePost,
-  createTag, deleteTag, logout, fetchMe
+  fetchPosts, fetchTags, fetchStats, fetchAdminPosts,
+  createPost, updatePost, deletePost, toggleDraft,
+  createTag, deleteTag, logout, fetchMe, changePassword
 } from '../api.js'
 
 function toast(msg, isError = false) {
@@ -38,6 +38,10 @@ function sidebarHTML(user, active) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
         标签管理
       </a>
+      <a href="#/admin/settings" class="${active === 'settings' ? 'active' : ''}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1.08z"/></svg>
+        账户设置
+      </a>
       <div class="sidebar-footer">
         <div class="user-name">${esc(user?.displayName || user?.username || '')}</div>
         <span class="logout-btn" id="logoutBtn">退出登录</span>
@@ -56,7 +60,7 @@ async function renderDashboard(container, user) {
         <div class="stats-row" id="statsRow">
           <div class="stat-card"><div class="stat-value">…</div><div class="stat-label">加载中</div></div>
         </div>
-        <div id="recentPosts"></div>
+        <div id="dashContent"></div>
       </div>
     </div>
   `
@@ -66,24 +70,51 @@ async function renderDashboard(container, user) {
   try {
     const stats = await fetchStats()
     container.querySelector('#statsRow').innerHTML = `
-      <div class="stat-card"><div class="stat-value">${stats.postCount}</div><div class="stat-label">文章总数</div></div>
-      <div class="stat-card"><div class="stat-value">${stats.tagCount}</div><div class="stat-label">标签数</div></div>
-      <div class="stat-card"><div class="stat-value">${stats.userCount}</div><div class="stat-label">用户数</div></div>
+      <div class="stat-card"><div class="stat-value">${stats.postCount}</div><div class="stat-label">已发布</div></div>
+      <div class="stat-card"><div class="stat-value">${stats.draftCount || 0}</div><div class="stat-label">草稿</div></div>
+      <div class="stat-card"><div class="stat-value">${stats.totalViews || 0}</div><div class="stat-label">总浏览量</div></div>
+      <div class="stat-card"><div class="stat-value">${stats.totalLikes || 0}</div><div class="stat-label">总点赞</div></div>
+      <div class="stat-card"><div class="stat-value">${stats.tagCount}</div><div class="stat-label">标签</div></div>
     `
-    container.querySelector('#recentPosts').innerHTML = `
+
+    let html = ''
+
+    // 最近文章
+    if (stats.recentPosts?.length) {
+      html += `
       <h2 style="font-family:var(--font-serif);font-size:18px;margin-bottom:16px">最近文章</h2>
       <table class="admin-table">
-        <thead><tr><th>标题</th><th>标签</th><th>日期</th></tr></thead>
+        <thead><tr><th>标题</th><th>标签</th><th>状态</th><th>浏览</th><th>日期</th></tr></thead>
         <tbody>
           ${stats.recentPosts.map(p => `
             <tr>
               <td class="post-title-cell">${esc(p.title)}</td>
-              <td>${esc(p.tag)}</td>
-              <td style="font-family:var(--font-mono);font-size:13px">${p.created_at}</td>
+              <td><span class="tag">${esc(p.tag)}</span></td>
+              <td>${p.is_draft ? '<span class="draft-badge">草稿</span>' : '<span class="pub-badge">已发布</span>'}</td>
+              <td style="font-family:var(--font-mono);font-size:13px">${p.view_count || 0}</td>
+              <td style="font-family:var(--font-mono);font-size:13px">${(p.created_at||'').slice(0,10)}</td>
             </tr>`).join('')}
         </tbody>
-      </table>
-    `
+      </table>`
+    }
+
+    // 热门文章
+    if (stats.topViewed?.length && stats.topViewed.some(p => p.view_count > 0)) {
+      html += `
+      <h2 style="font-family:var(--font-serif);font-size:18px;margin:28px 0 16px">热门文章</h2>
+      <table class="admin-table">
+        <thead><tr><th>标题</th><th>浏览量</th></tr></thead>
+        <tbody>
+          ${stats.topViewed.map((p, i) => `
+            <tr>
+              <td class="post-title-cell">${i + 1}. ${esc(p.title)}</td>
+              <td style="font-family:var(--font-mono);font-size:13px">${p.view_count}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`
+    }
+
+    container.querySelector('#dashContent').innerHTML = html
   } catch (err) {
     container.querySelector('#statsRow').innerHTML = `<div class="stat-card"><div class="stat-value" style="font-size:16px">加载失败</div><div class="stat-label">${esc(err.message)}</div></div>`
   }
@@ -110,21 +141,24 @@ async function renderPosts(container, user, { editingId = null } = {}) {
   if (!editingId) {
     content.innerHTML = '<p style="color:var(--text-muted)">加载中…</p>'
     try {
-      const { posts } = await fetchPosts()
+      // 用 admin API 获取所有文章（含草稿）
+      const { posts } = await fetchAdminPosts()
       content.innerHTML = `
         <table class="admin-table">
-          <thead><tr><th>标题</th><th>标签</th><th>日期</th><th>精选</th><th>操作</th></tr></thead>
+          <thead><tr><th>标题</th><th>标签</th><th>状态</th><th>浏览</th><th>日期</th><th>操作</th></tr></thead>
           <tbody>
             ${posts.map(p => `
               <tr>
                 <td class="post-title-cell">${esc(p.title)}</td>
                 <td><span class="tag">${esc(p.tag)}</span></td>
-                <td style="font-family:var(--font-mono);font-size:13px">${p.created_at?.slice(0,10)}</td>
-                <td>${p.is_featured ? '★' : ''}</td>
+                <td>${p.is_draft ? '<span class="draft-badge">草稿</span>' : '<span class="pub-badge">已发布</span>'}</td>
+                <td style="font-family:var(--font-mono);font-size:13px">${p.view_count || 0}</td>
+                <td style="font-family:var(--font-mono);font-size:13px">${(p.created_at||'').slice(0,10)}</td>
                 <td>
                   <div class="action-btns">
                     <button class="action-btn" data-action="edit" data-id="${p.id}">编辑</button>
                     <button class="action-btn" data-action="view" data-slug="${p.slug}">预览</button>
+                    <button class="action-btn" data-action="draft" data-id="${p.id}" data-draft="${p.is_draft}">${p.is_draft ? '发布' : '存草稿'}</button>
                     <button class="action-btn danger" data-action="delete" data-id="${p.id}">删除</button>
                   </div>
                 </td>
@@ -135,11 +169,18 @@ async function renderPosts(container, user, { editingId = null } = {}) {
 
       content.querySelectorAll('[data-action]').forEach(btn => {
         btn.addEventListener('click', async () => {
-          const { action, id, slug } = btn.dataset
+          const { action, id, slug, draft } = btn.dataset
           if (action === 'edit') window.location.hash = `/admin/posts/${id}`
           if (action === 'view') window.location.hash = `/post/${slug}`
+          if (action === 'draft') {
+            try {
+              await toggleDraft(id)
+              toast(draft === '1' ? '已发布' : '已存为草稿')
+              renderPosts(container, user)
+            } catch (err) { toast(err.message, true) }
+          }
           if (action === 'delete') {
-            if (!confirm('确定删除这篇文章？')) return
+            if (!confirm('确定删除这篇文章？此操作不可撤销。')) return
             try { await deletePost(id); toast('已删除'); renderPosts(container, user) }
             catch (err) { toast(err.message, true) }
           }
@@ -158,7 +199,7 @@ async function renderPosts(container, user, { editingId = null } = {}) {
     let post = null
     if (!isNew) {
       try {
-        const d = await fetchPosts()
+        const d = await fetchAdminPosts()
         post = d.posts.find(p => p.id === parseInt(editingId))
       } catch (err) {
         content.innerHTML = `<p style="color:#e07070">${esc(err.message)}</p>`
@@ -167,7 +208,6 @@ async function renderPosts(container, user, { editingId = null } = {}) {
       if (!post) { content.innerHTML = '<p>文章不存在</p>'; return }
     }
 
-    // 获取标签列表
     let tagList = []
     try { const d = await fetchTags(); tagList = d.tags.map(t => t.name) } catch {}
 
@@ -192,9 +232,15 @@ async function renderPosts(container, user, { editingId = null } = {}) {
             <label>正文（HTML）</label>
             <textarea name="body" rows="16" required>${esc(post?.body_html || '')}</textarea>
           </div>
-          <div class="form-group" style="display:flex;align-items:center;gap:8px">
-            <input type="checkbox" name="featured" id="featuredCheck" ${post?.is_featured ? 'checked' : ''} />
-            <label for="featuredCheck" style="margin:0">设为精选文章</label>
+          <div class="form-group" style="display:flex;gap:20px;align-items:center">
+            <label style="margin:0;display:flex;align-items:center;gap:6px">
+              <input type="checkbox" name="featured" ${post?.is_featured ? 'checked' : ''} />
+              精选
+            </label>
+            <label style="margin:0;display:flex;align-items:center;gap:6px">
+              <input type="checkbox" name="draft" ${post?.is_draft ? 'checked' : ''} />
+              草稿（不公开）
+            </label>
           </div>
           <div class="editor-actions">
             <button type="button" class="btn btn-ghost" id="cancelBtn">${isNew ? '取消' : '返回列表'}</button>
@@ -216,7 +262,8 @@ async function renderPosts(container, user, { editingId = null } = {}) {
         tag: fd.get('tag').trim(),
         excerpt: fd.get('excerpt')?.trim() || '',
         body: fd.get('body'),
-        isFeatured: fd.get('featured') === 'on'
+        isFeatured: fd.get('featured') === 'on',
+        isDraft: fd.get('draft') === 'on'
       }
       try {
         if (isNew) {
@@ -281,10 +328,66 @@ async function renderTags(container, user) {
   })
 }
 
+// ===== 账户设置 =====
+async function renderSettings(container, user) {
+  container.innerHTML = `
+    <div class="admin-layout">
+      ${sidebarHTML(user, 'settings')}
+      <div class="admin-main">
+        <h1>账户设置</h1>
+
+        <div class="editor-panel" style="max-width:420px">
+          <h2 style="font-family:var(--font-serif);font-size:18px;margin-bottom:20px">修改密码</h2>
+          <form id="pwdForm">
+            <div class="form-group">
+              <label>旧密码</label>
+              <input type="password" name="old" required />
+            </div>
+            <div class="form-group">
+              <label>新密码</label>
+              <input type="password" name="new" required minlength="6" />
+            </div>
+            <div class="form-group">
+              <label>确认新密码</label>
+              <input type="password" name="confirm" required minlength="6" />
+            </div>
+            <button type="submit" class="btn btn-primary">更新密码</button>
+          </form>
+        </div>
+
+        <div class="editor-panel" style="max-width:420px;margin-top:24px">
+          <h2 style="font-family:var(--font-serif);font-size:18px;margin-bottom:16px">账户信息</h2>
+          <table class="admin-table">
+            <tbody>
+              <tr><td>用户名</td><td style="font-family:var(--font-mono)">${esc(user?.username || '')}</td></tr>
+              <tr><td>显示名</td><td>${esc(user?.displayName || '')}</td></tr>
+              <tr><td>角色</td><td>${esc(user?.role || '')}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `
+  document.querySelector('#logoutBtn').addEventListener('click', () => { logout(); window.location.hash = '/' })
+
+  container.querySelector('#pwdForm')?.addEventListener('submit', async e => {
+    e.preventDefault()
+    const fd = new FormData(e.target)
+    const oldP = fd.get('old'), newP = fd.get('new'), confirmP = fd.get('confirm')
+    if (newP !== confirmP) { toast('两次新密码不一致', true); return }
+    try {
+      await changePassword(oldP, newP)
+      toast('密码已更新')
+      e.target.reset()
+    } catch (err) {
+      toast(err.message, true)
+    }
+  })
+}
+
 // ===== 路由分发 =====
 export default {
   render(container, params) {
-    // 检查登录
     if (!localStorage.getItem('blog-token')) {
       window.location.hash = '/login'
       return
@@ -298,6 +401,8 @@ export default {
         else renderPosts(container, user)
       } else if (sub === 'tags') {
         renderTags(container, user)
+      } else if (sub === 'settings') {
+        renderSettings(container, user)
       } else {
         renderDashboard(container, user)
       }

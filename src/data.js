@@ -229,16 +229,221 @@ stfld loginState  // this.loginState = true
 
 <p>横评的价值不在排名，在于方法论：建立你自己的评测集，用你真实的任务来打分。别人的排行榜是别人的工作流，你的才是你的。</p>
     `
+  },
+  // ===== 新增文章 =====
+  {
+    id: 'wsl2-ubuntu-setup',
+    title: 'Windows 上把 Ubuntu 装进 2GB 的 VHD：WSL2 最小化配置',
+    tag: '效率工具',
+    date: '2026-08-18',
+    readMin: 10,
+    excerpt: 'WSL2 默认的 Ubuntu 镜像占 3.8GB，装完一堆包轻松突破 8GB。这篇记录了一套把 WSL2 压到 2GB 以下的配置方案：最小化安装、Docker Desktop 替代、文件 I/O 优化。',
+    body: `
+<p>WSL2 是 Windows 上跑 Linux 工具链的最佳方案，但默认的 Ubuntu 镜像越来越臃肿。一个"干净"的 Ubuntu 22.04 WSL2 实例，不装任何额外软件，也要 3.8GB。加上 Docker、Node、Python 全家桶，轻松突破 10GB。</p>
+
+<h2>从 Alpine 起步</h2>
+<p>如果不需要完整的 Debian 生态，Alpine Linux 的 WSL2 镜像只有 130MB。apk 包管理器比 apt 快一个量级。代价是：Alpine 用 musl libc 而不是 glibc，部分预编译二进制（比如某些 Node 原生模块、PyTorch wheel）会不兼容。</p>
+
+<pre><code># 导入最小化 Alpine WSL2 镜像
+wsl --import myalpine .\\alpine.tar.gz --version 2
+
+# 进入后装基本工具
+apk add bash git curl python3 nodejs npm
+# 总共约 200MB</code></pre>
+
+<h2>Docker Desktop 的替代</h2>
+<p>Docker Desktop 在 WSL2 里跑，额外占 2~3GB。替代方案：直接用 WSL2 里的 Docker Engine，不装 Desktop。或者用 Podman（rootless），内存占用减半。</p>
+
+<blockquote>WSL2 的 2GB 上限不是物理限制，是你给自己设的心理锚点。但设了之后，你会开始做减法，而做减法的过程本身很有价值。</blockquote>
+
+<h2>文件 I/O 的生死线</h2>
+<p>WSL2 最大的性能杀手是跨文件系统 I/O：Linux 进程读写 <code>/mnt/c/</code> 下的文件，比读写 <code>/home/user/</code> 慢 5~10 倍。所有项目代码、venv、node_modules 都放在 Linux 文件系统里，<code>/mnt/c</code> 只放需要 Windows 侧访问的东西（比如共享目录、日志）。</p>
+
+<ul>
+  <li>项目代码 → <code>/home/user/projects/</code></li>
+  <li>venv / node_modules → 同项目目录</li>
+  <li>VS Code Remote → 走 WSL2 的 SSH，不走 <code>/mnt/c</code></li>
+  <li>日志 / 临时文件 → <code>/tmp/</code>（tmpfs，不落盘）</li>
+</ul>
+
+<hr />
+
+<p>折腾完这套配置，WSL2 实例稳定在 1.8GB，冷启动 3 秒，Docker build 速度不输原生 Linux。不是"能省则省"，而是"每个字节都有存在理由"。</p>
+    `
+  },
+  {
+    id: 'hobbyist-hardware-2026',
+    title: '2026 年个人硬件采购指南：钱花在刀刃上',
+    tag: '硬件',
+    date: '2026-08-15',
+    readMin: 13,
+    excerpt: '从 CPU 到显卡到显示器，每个位置都算过 TCO（总拥有成本）。不是"最新最好"，而是"在你的使用场景下，边际收益最高"的那一档。',
+    body: `
+<p>硬件采购最忌两个极端：一是"追新"，二是"极致性价比"。前者为 5% 的性能提升付 30% 的溢价，后者为省 200 块忍受三年的妥协。我的原则：<strong>在边际收益曲线上找拐点</strong>。</p>
+
+<h2>CPU：核心数 vs 单核性能</h2>
+<p>2026 年的桌面 CPU 格局：Intel 14 代 Core（Raptor Lake Refresh）vs AMD 9000 系列（Zen 5）。如果你主要跑本地模型推理和编译，单核性能权重高于核心数——因为大部分 AI 工具链（PyTorch、CUDA、llama.cpp）还是单线程瓶颈为主。9800X3D 的 3D V-Cache 在游戏和编译上都有明显优势，但对 AI 推理帮助有限。</p>
+
+<pre><code>场景            权重分配          推荐
+AI 推理         单核 70% 核心 30%  9800X3D
+游戏            单核 50% 核心 50%  9800X3D
+编译/CI         核心 60% 单核 40%  14900K
+视频剪辑        核心 70% 单核 30%  14900K / 9950X</code></pre>
+
+<h2>显卡：本地推理的唯一真神</h2>
+<p>本地跑大模型，显卡是绝对瓶颈。24GB 显存的 4090 是目前性价比天花板：Q8 量化 27B 模型刚好装下，Q4 量化 70B 可以 offload 一部分到 CPU。5090 的 32GB 显存值得等，但 4090 的二手市场价格已经很合理。</p>
+
+<blockquote>显卡选购的唯一指标：显存容量 > 核心数量 > 频率。能装下模型是第一优先级，其他都是锦上添花。</blockquote>
+
+<h2>显示器：144Hz 够用，4K 看距离</h2>
+<p>27 寸 1440P 144Hz 是甜点。4K 显示器在 27 寸上像素密度过高，长时间写代码眼睛会累（需要开字体缩放，又回到高 PPI 的代价）。如果做 3D 建模或视频调色，4K 才有意义。</p>
+
+<ul>
+  <li>编程主屏：27" 1440P 144Hz IPS</li>
+  <li>副屏：32" 4K 60Hz（看文档、查资料）</li>
+  <li>预算分配：显卡 &gt; CPU &gt; 显示器 &gt; 内存 &gt; SSD</li>
+</ul>
+
+<hr />
+
+<p>硬件不是投资，是工具。工具的价值不在于参数表上的数字，在于它能不能让你的工作流不被打断。能跑通、不发热、不卡顿，就是好硬件。</p>
+    `
+  },
+  {
+    id: 'note-taking-system',
+    title: '我的笔记系统：从 Notion 到纯文本的三年迁移',
+    tag: '效率工具',
+    date: '2026-08-12',
+    readMin: 9,
+    excerpt: '用 Notion 三年之后，我把它删了。不是因为 Notion 不好，是因为"笔记工具"本身在偷我的注意力。现在的方案：纯文本 + Git + 一个 50 行的搜索脚本。',
+    body: `
+<p>2023 年开始用 Notion 做知识管理。三年下来，笔记有 2000+ 条，数据库建了 7 个，模板调了 40 多次。然后有一天我打开 Notion，发现我在"管理笔记"上花的时间，比"写笔记"多三倍。</p>
+
+<h2>工具在偷注意力</h2>
+<p>Notion 的问题不是功能少，是功能太多。每一个数据库视图、每一个模板、每一个集成都在消耗认知带宽。你本来要查一个概念，结果花了十分钟调整过滤器和排序。笔记工具变成了笔记本身——你在维护一个系统，而不是在积累知识。</p>
+
+<blockquote>好的笔记工具应该消失在背景里。如果你每天花超过 5 分钟在"管理笔记"上，说明工具太重了。</blockquote>
+
+<h2>纯文本 + Git 方案</h2>
+<p>现在的系统：<code>~/notes/</code> 目录下全是 <code>.md</code> 文件，按主题分目录，用 Git 做版本控制。搜索靠 <code>grep -ri "关键词" ~/notes/</code>。备份靠 Git 推远端仓库。没有数据库、没有视图、没有同步冲突。</p>
+
+<pre><code>~/notes/
+├── ai/           # AI 相关
+│   ├── mtp.md
+│   ├── quantization.md
+│   └── prompt-engineering.md
+├── hardware/     # 硬件
+│   └── 4090-inference.md
+├── dev/          # 开发
+│   ├── rust-ecs.md
+│   └── wsl2-setup.md
+└── journal/      # 日记/碎片
+    └── 2026-08.md</code></pre>
+
+<h2>为什么纯文本赢了</h2>
+<ul>
+  <li>零依赖：20 年后还能打开</li>
+  <li>零学习成本：<code>cat</code> 就能看</li>
+  <li>版本控制：Git 的 commit history 比任何笔记软件的时间线都强大</li>
+  <li>可搜索：<code>grep</code> / <code>ripgrep</code> 比任何前端搜索都快</li>
+  <li>可迁移：换电脑 <code>git clone</code> 就完事</li>
+</ul>
+
+<hr />
+
+<p>工具迭代的终极形态不是"更强的功能"，而是"更少的使用痕迹"。当你不再意识到笔记工具的存在，它才真正消失了。</p>
+    `
+  },
+  {
+    id: 'hangzhou-summer-heat',
+    title: '杭州 42°C：一个工程师的夏天生存策略',
+    tag: '生活',
+    date: '2026-08-08',
+    readMin: 6,
+    excerpt: '连续 12 天 38°C+ 的杭州，空调电费涨了 80%，但人的状态垮得比电费更快。记录一些真正有效的降温策略，以及一些无效但看起来很有用的"技巧"。',
+    body: `
+<p>2026 年 7 月底到 8 月中旬，杭州连续 12 天白天最高温 38°C 以上，体感 45°C+。空调从早上 6 点开到凌晨 2 点，电费账单看着血压上升。但真正的问题是：人在 35°C 以上的房间里，认知能力会显著下降。写代码的 bug 率、阅读理解的深度、决策的质量，都在下降。</p>
+
+<h2>有效的降温策略</h2>
+<ul>
+  <li>空调温度设 26°C，不追求 22°C。温差过大反而让身体调节能力变差</li>
+  <li>下午 2-5 点最热时段，拉窗帘 + 开百叶窗挡阳光直射，比多开一小时空调省电</li>
+  <li>睡前开空调定时 2 小时，不是整晚。后半夜体温自然下降，不需要制冷</li>
+  <li>冰毛巾敷后颈：比冰块敷额头有效，因为颈动脉离皮肤近</li>
+</ul>
+
+<h2>无效但看起来有用的"技巧"</h2>
+<ul>
+  <li>"多喝温水"：38°C 的房间里喝温水，体感温度不变，只会让你出汗更多</li>
+  <li>"绿豆汤"：心理安慰大于生理降温</li>
+  <li>"穿浅色衣服"：室内穿什么颜色对体温影响 &lt; 0.1°C</li>
+</ul>
+
+<blockquote>高温下最有效的降温策略不是任何技巧，是降低产热：少写代码，少开会，少做需要深度思考的事。人不是恒温的，你的认知带宽随核心温度波动。</blockquote>
+
+<h2>电费账</h2>
+<p>7 月空调电费：487 元（平时 280 元）。多出来的 207 元，买回的是每天 3 小时的有效工作时间。按小时工资算，这笔账是划算的。但按"健康寿命"算，连续两周 26°C 空调房 + 40°C 室外通勤，对心血管的累积压力，不是一笔小账。</p>
+
+<hr />
+
+<p>杭州的夏天不是天气问题，是基础设施问题。地下管廊、地铁空调覆盖、公共避暑空间，这些才是该讨论的议题。个人层面的"生存策略"，本质上是在为基础设施缺口打补丁。</p>
+    `
+  },
+  {
+    id: 'rust-vs-python-2026',
+    title: 'Rust 和 Python 在 2026 年还是对手吗？',
+    tag: 'AI 工程',
+    date: '2026-08-05',
+    readMin: 10,
+    excerpt: 'Rust 在系统编程、Web 后端、游戏引擎领域已经站稳，Python 在 AI/ML 领域依然是绝对王者。但 2026 年的真实情况是：它们越来越多地在同一个项目里共存，而不是二选一。',
+    body: `
+<p>"Rust 会取代 Python"这个说法在 2020 年很流行，到 2026 年已经基本消亡。原因很简单：两个语言解决的问题域不同，而且边界在扩大。</p>
+
+<h2>实际项目中的共存模式</h2>
+<p>一个典型的本地 AI 工具链项目：Python 做模型加载、推理调度、API 服务；Rust 做高性能推理引擎、图像处理、文件 I/O。Python 通过 PyO3 调用 Rust 扩展，Rust 通过 PyO3 回调 Python。两层各干各的事，边界清晰。</p>
+
+<pre><code># Python 侧：模型调度
+from inference_engine import fast_decode  # Rust 扩展
+
+def run_inference(model, prompt):
+    # Python 处理 tokenization、prompt 模板
+    tokens = tokenizer.encode(prompt)
+    # Rust 处理 GPU 推理、KV Cache 管理
+    result = fast_decode(model, tokens)
+    return tokenizer.decode(result)</code></pre>
+
+<h2>什么时候选 Rust</h2>
+<ul>
+  <li>性能敏感：GPU 推理、实时渲染、游戏循环</li>
+  <li>内存安全：长驻服务、系统工具、嵌入式</li>
+  <li>编译产物：CLI 工具、跨平台二进制</li>
+  <li>类型安全：大型项目、多人协作</li>
+</ul>
+
+<h2>什么时候选 Python</h2>
+<ul>
+  <li>AI/ML：PyTorch、JAX、HuggingFace 生态</li>
+  <li>快速原型：想法验证、数据探索</li>
+  <li>胶水代码：调度、编排、API 集成</li>
+  <li>科学计算：NumPy、SciPy、pandas</li>
+</ul>
+
+<blockquote>2026 年的语言选型不是"哪个更好"，而是"哪个在这个模块里摩擦最小"。Rust 的摩擦在编译时间和借用检查，Python 的摩擦在运行时性能和类型安全。让每种语言待在摩擦最低的位置。</blockquote>
+
+<hr />
+
+<p>语言和工具都是手段。当一个项目里 Rust 和 Python 各干各的事、边界清晰、互不侵入的时候，选型问题就不存在了——它们只是两个不同频率的齿轮。</p>
+    `
   }
 ]
 
 export const tags = [
-  { name: '大模型', count: 8 },
-  { name: 'AI 工程', count: 5 },
-  { name: '硬件', count: 4 },
-  { name: '游戏开发', count: 3 },
-  { name: '逆向工程', count: 2 },
-  { name: '生活', count: 6 },
-  { name: '效率工具', count: 3 },
-  { name: '读书笔记', count: 4 }
+  { name: '大模型', count: 2 },
+  { name: 'AI 工程', count: 2 },
+  { name: '硬件', count: 2 },
+  { name: '游戏开发', count: 1 },
+  { name: '逆向工程', count: 1 },
+  { name: '生活', count: 1 },
+  { name: '效率工具', count: 2 },
+  { name: '读书笔记', count: 0 }
 ]

@@ -4,13 +4,17 @@ const routes = {
   '/': () => import('./pages/home.js'),
   '/post/:id': () => import('./pages/article.js'),
   '/about': () => import('./pages/about.js'),
+  '/hot': () => import('./pages/hot.js'),
+  '/ainews': () => import('./pages/ainews.js'),
   '/search': () => import('./pages/search.js'),
   '/login': () => import('./pages/auth.js'),
   '/register': () => import('./pages/auth.js'),
   '/admin': () => import('./pages/admin.js'),
   '/admin/posts': () => import('./pages/admin.js'),
+  '/admin/posts/new': () => import('./pages/admin.js'),
   '/admin/posts/:id': () => import('./pages/admin.js'),
   '/admin/tags': () => import('./pages/admin.js'),
+  '/admin/settings': () => import('./pages/admin.js'),
 }
 
 const app = document.getElementById('app')
@@ -49,7 +53,16 @@ export async function render() {
   // 导航高亮
   updateNav(key)
 
-  if (!route) { render404(); return }
+  if (!route) {
+    // 使用专门的 404 页面
+    import('./pages/404.js').then(mod => {
+      const hash = window.location.hash.slice(1)
+      const path = hash.split('?')[0]
+      mod.default.render(app, { path })
+      requestAnimationFrame(onPageRender)
+    })
+    return
+  }
 
   const mod = await route.loader()
   const C = mod.default
@@ -62,6 +75,7 @@ export async function render() {
   else if (key === '/admin/posts') params.sub = 'posts'
   else if (key === '/admin/posts/:id') { params.sub = 'posts'; params.id = params.id }
   else if (key === '/admin/tags') params.sub = 'tags'
+  else if (key === '/admin/settings') params.sub = 'settings'
 
   const cleanup = C.render(app, params)
   if (typeof cleanup === 'function') currentComponent.cleanup = cleanup
@@ -70,15 +84,6 @@ export async function render() {
 
   // 页面渲染后触发动态特效
   requestAnimationFrame(onPageRender)
-}
-
-function render404() {
-  app.innerHTML = `
-    <div class="page"><div class="empty-state">
-      <div class="icon">∅</div>
-      <p>页面不存在</p>
-      <p style="margin-top:12px"><a href="#/" style="color:var(--accent)">← 返回首页</a></p>
-    </div></div>`
 }
 
 function updateNav(key) {

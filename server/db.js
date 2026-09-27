@@ -30,6 +30,8 @@ export async function createDb() {
       excerpt TEXT DEFAULT '',
       body_html TEXT NOT NULL,
       is_featured INTEGER DEFAULT 0,
+      is_draft INTEGER DEFAULT 0,
+      view_count INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -40,9 +42,32 @@ export async function createDb() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS likes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER NOT NULL,
+      user_key TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(post_id, user_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS bookmarks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER NOT NULL,
+      user_key TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(post_id, user_key)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_tag ON posts(tag);
     CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_posts_draft ON posts(is_draft);
+    CREATE INDEX IF NOT EXISTS idx_likes_user ON likes(user_key);
+    CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_key);
   `)
+
+  // 兼容旧库：补加新字段
+  try { db.prepare('ALTER TABLE posts ADD COLUMN is_draft INTEGER DEFAULT 0').run() } catch {}
+  try { db.prepare('ALTER TABLE posts ADD COLUMN view_count INTEGER DEFAULT 0').run() } catch {}
 
   // 种子数据（首次运行）
   const count = db.prepare('SELECT COUNT(*) as n FROM posts').get()
@@ -78,7 +103,7 @@ function seedPosts(db) {
     {
       title: '24GB 显存能装下什么：本地推理的容量账本', slug: 'rtx4090-local-inference', tag: '硬件', featured: 0,
       excerpt: '一张 4090 到底能跑多大的模型？量化位宽、KV Cache 开销、框架损耗，把这笔账算清楚。',
-      body: `<p>本地推理的显存预算是一道算术题，而且是一道不能出错、不能凑整的算术题。</p><h2>模型权重的显存占用</h2><p>27B 参数 FP16 需要 54GB；Q8 量化约 28GB；Q4 量化约 15GB。</p><pre><code>权重显存 ≈ 参数量 × 每参数字节数\nQ8:  27e9 × 1.06 ≈ 28.6 GB\nQ4:  27e9 × 0.57 ≈ 15.4 GB</code></pre><h2>KV Cache 是被低估的大户</h2><p>27B 模型 8K 上下文下 KV Cache 就要 2~3GB，32K 翻四倍。</p><ul><li>权重 + KV Cache + 框架 overhead ≈ 总显存需求</li><li>留 2GB 余量给系统和驱动</li></ul>`
+      body: `<p>本地推理的显存预算是一道算术题，而且是一道不能出错、不能凑整的算术题。</p><h2>模型权重的显存占用</h2><p>27B 参数 FP16 需要 54GB；Q8 量化后约 28GB；Q4 量化后约 15GB。</p><pre><code>权重显存 ≈ 参数量 × 每参数字节数\nQ8:  27e9 × 1.06 ≈ 28.6 GB\nQ4:  27e9 × 0.57 ≈ 15.4 GB</code></pre><h2>KV Cache 是被低估的大户</h2><p>27B 模型 8K 上下文下 KV Cache 就要 2~3GB，32K 翻四倍。</p><ul><li>权重 + KV Cache + 框架 overhead ≈ 总显存需求</li><li>留 2GB 余量给系统和驱动</li></ul>`
     },
     {
       title: '用 Rust 重构坦克大战：从"能跑"到"优雅"', slug: 'tank-battle-refactor', tag: '游戏开发', featured: 0,
@@ -94,6 +119,31 @@ function seedPosts(db) {
       title: '2026 国模横评：开源大模型的真实实力榜', slug: 'local-model-ranking', tag: '大模型', featured: 0,
       excerpt: '不看跑分看实效。从代码生成、数学推理、长文理解、工具调用四个维度做盲测。',
       body: `<p>模型评测榜是营销工具，不是选型依据。本文用四个真实场景做盲测。</p><h2>测试方法</h2><ul><li>代码生成：20 个真实需求，评分 0-5</li><li>数学推理：10 道竞赛级题目</li><li>长文理解：3 万 token 文档，15 个定位问题</li><li>工具调用：10 个 API 编排任务</li></ul><h2>意外发现</h2><p>排行榜第一的模型在工具调用维度只排第三。function calling 格式对多轮嵌套调用支持较弱。</p><blockquote>选模型不是选"最聪明的"，是选"在你的工作流里最稳的"。</blockquote>`
+    },
+    {
+      title: 'Windows 上把 Ubuntu 装进 2GB 的 VHD：WSL2 最小化配置', slug: 'wsl2-ubuntu-setup', tag: '效率工具', featured: 0,
+      excerpt: 'WSL2 默认的 Ubuntu 镜像占 3.8GB。这篇记录了一套把 WSL2 压到 2GB 以下的配置方案。',
+      body: `<p>WSL2 默认的 Ubuntu 镜像越来越臃肿。一个"干净"的 Ubuntu 22.04 WSL2 实例，不装任何额外软件，也要 3.8GB。</p><h2>从 Alpine 起步</h2><p>Alpine Linux 的 WSL2 镜像只有 130MB。apk 包管理器比 apt 快一个量级。</p><pre><code>wsl --import myalpine .\\alpine.tar.gz --version 2\napk add bash git curl python3 nodejs npm</code></pre><h2>Docker Desktop 的替代</h2><p>直接用 WSL2 里的 Docker Engine，不装 Desktop。或者用 Podman（rootless），内存占用减半。</p><blockquote>WSL2 的 2GB 上限不是物理限制，是你给自己设的心理锚点。</blockquote>`
+    },
+    {
+      title: '2026 年个人硬件采购指南：钱花在刀刃上', slug: 'hobbyist-hardware-2026', tag: '硬件', featured: 0,
+      excerpt: '从 CPU 到显卡到显示器，每个位置都算过 TCO。不是"最新最好"，而是"在你的使用场景下，边际收益最高"的那一档。',
+      body: `<p>硬件采购最忌两个极端：一是"追新"，二是"极致性价比"。我的原则：<strong>在边际收益曲线上找拐点</strong>。</p><h2>CPU：核心数 vs 单核性能</h2><p>如果你主要跑本地模型推理和编译，单核性能权重高于核心数。</p><pre><code>场景            权重分配          推荐\nAI 推理         单核 70% 核心 30%  9800X3D\n游戏            单核 50% 核心 50%  9800X3D\n编译/CI         核心 60% 单核 40%  14900K</code></pre><h2>显卡：本地推理的唯一真神</h2><p>24GB 显存的 4090 是目前性价比天花板。能装下模型是第一优先级。</p><blockquote>显卡选购的唯一指标：显存容量 > 核心数量 > 频率。</blockquote>`
+    },
+    {
+      title: '我的笔记系统：从 Notion 到纯文本的三年迁移', slug: 'note-taking-system', tag: '效率工具', featured: 0,
+      excerpt: '用 Notion 三年之后，我把它删了。现在的方案：纯文本 + Git + 一个 50 行的搜索脚本。',
+      body: `<p>2023 年开始用 Notion 做知识管理。三年下来，笔记有 2000+ 条，数据库建了 7 个。然后有一天我打开 Notion，发现我在"管理笔记"上花的时间，比"写笔记"多三倍。</p><h2>工具在偷注意力</h2><p>每一个数据库视图、每一个模板、每一个集成都在消耗认知带宽。</p><blockquote>好的笔记工具应该消失在背景里。</blockquote><h2>纯文本 + Git 方案</h2><p><code>~/notes/</code> 目录下全是 <code>.md</code> 文件，按主题分目录，用 Git 做版本控制。</p><ul><li>零依赖：20 年后还能打开</li><li>零学习成本：<code>cat</code> 就能看</li><li>版本控制：Git 的 commit history 比任何笔记软件的时间线都强大</li></ul>`
+    },
+    {
+      title: '杭州 42°C：一个工程师的夏天生存策略', slug: 'hangzhou-summer-heat', tag: '生活', featured: 0,
+      excerpt: '连续 12 天 38°C+ 的杭州，空调电费涨了 80%。记录一些真正有效的降温策略。',
+      body: `<p>2026 年 7 月底到 8 月中旬，杭州连续 12 天白天最高温 38°C 以上，体感 45°C+。</p><h2>有效的降温策略</h2><ul><li>空调温度设 26°C，不追求 22°C</li><li>下午 2-5 点最热时段，拉窗帘挡阳光直射</li><li>睡前开空调定时 2 小时</li><li>冰毛巾敷后颈</li></ul><h2>无效但看起来有用的"技巧"</h2><ul><li>"多喝温水"：体感温度不变</li><li>"绿豆汤"：心理安慰大于生理降温</li></ul><blockquote>高温下最有效的降温策略是降低产热：少写代码，少开会。</blockquote>`
+    },
+    {
+      title: 'Rust 和 Python 在 2026 年还是对手吗？', slug: 'rust-vs-python-2026', tag: 'AI 工程', featured: 0,
+      excerpt: 'Rust 在系统编程站稳，Python 在 AI/ML 仍是绝对王者。但 2026 年的真实情况是：它们越来越多地在同一个项目里共存。',
+      body: `<p>"Rust 会取代 Python"这个说法在 2020 年很流行，到 2026 年已经基本消亡。</p><h2>实际项目中的共存模式</h2><p>Python 做模型加载、推理调度、API 服务；Rust 做高性能推理引擎、图像处理。</p><pre><code>from inference_engine import fast_decode  # Rust 扩展\ndef run_inference(model, prompt):\n    tokens = tokenizer.encode(prompt)\n    result = fast_decode(model, tokens)\n    return tokenizer.decode(result)</code></pre><h2>什么时候选 Rust</h2><ul><li>性能敏感：GPU 推理、实时渲染</li><li>内存安全：长驻服务、系统工具</li><li>编译产物：CLI 工具、跨平台二进制</li></ul><h2>什么时候选 Python</h2><ul><li>AI/ML：PyTorch、JAX、HuggingFace 生态</li><li>快速原型：想法验证、数据探索</li></ul><blockquote>让每种语言待在摩擦最低的位置。</blockquote>`
     }
   ]
 
